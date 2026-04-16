@@ -202,6 +202,33 @@ pnpm install
 pnpm -r build
 ```
 
+## 9.3.1 本地开发注意：构建后需手动同步到 extensions
+
+Gateway 通过扫描 `~/.openclaw/extensions/` 目录加载插件（使用 `fs.readdirSync` + `entry.isDirectory()`，**不支持 symlink**）。因此本插件采用真实目录拷贝方式安装：
+
+```
+~/.openclaw/extensions/memory-fabric/   ← gateway 实际加载路径
+packages/plugin/                        ← 源码与构建产物
+```
+
+每次执行 `pnpm -r build` 后，`dist/` 会在源码目录更新，但 extensions 里的拷贝**不会自动同步**。需手动执行：
+
+```bash
+rsync -a --delete packages/plugin/dist/ ~/.openclaw/extensions/memory-fabric/dist/
+rsync -a packages/plugin/openclaw.plugin.json \
+         packages/plugin/skills/ \
+         packages/plugin/package.json \
+         ~/.openclaw/extensions/memory-fabric/
+```
+
+同步完成后重启 gateway 才能生效：
+
+```bash
+openclaw gateway restart
+```
+
+> **注意**：`node_modules` 变更（依赖升级）不适合 rsync，需重新执行完整安装流程。
+
 ## 9.4 目录准备
 ```bash
 mkdir -p ./runtime-data/carriers
