@@ -1,0 +1,49 @@
+# OpenClaw Memory Fabric — example plugin configuration
+#
+# Place this block inside your openclaw.yaml under:
+#   plugins.entries.memory-fabric.config
+#
+# All fields shown here are optional — defaults are applied for anything omitted.
+
+plugins:
+  entries:
+    memory-fabric:
+      package: "@openclaw-memory-fabric/plugin"
+      enabled: true
+      config:
+        # Default memory scope for new sessions.
+        # Options: private | project | shared | auto
+        defaultScope: project
+
+        # Token budget per recall depth layer.
+        recallBudget:
+          l0Tokens: 600   # minimal summary always injected
+          l1Tokens: 1800  # medium overview on-demand
+          l2Tokens: 5000  # deep-dive on complex tasks
+
+        # Local sidecar HTTP service.
+        sidecar:
+          baseUrl: "http://127.0.0.1:7811"
+          timeoutMs: 12000
+
+        # OpenViking long-term memory backend.
+        openviking:
+          mode: local                          # local | remote
+          basePath: "~/.openviking"
+          targetRoot: "viking://org/acme"
+
+        # Graphify structural cognition backend.
+        graphify:
+          basePath: "~/.graphify-projects"
+          autoBootstrap: true
+          autoRefresh: manual                  # manual | on-demand | scheduled
+
+        # Sharing policy defaults.
+        publishPolicy:
+          defaultVisibility: private           # private | project_shared | org_shared
+          allowOrgShared: true
+
+        # Observability settings.
+        observability:
+          logLevel: info                       # debug | info | warn | error
+          emitMetrics: true

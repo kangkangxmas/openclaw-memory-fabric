@@ -1,0 +1,258 @@
+{
+  "id": "memory-fabric",
+  "name": "OpenClaw Memory Fabric",
+  "version": "1.6.0",
+  "description": "Multi-agent memory orchestration plugin for OpenClaw. Provides memory isolation, cross-session persistence, long-term knowledge carriers, and structural cognition via Graphify.",
+  "entry": "dist/index.js",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "defaultScope": {
+        "type": "string",
+        "enum": ["private", "project", "shared", "auto"],
+        "default": "project"
+      },
+      "recallBudget": {
+        "type": "object",
+        "properties": {
+          "l0Tokens": { "type": "number", "minimum": 1, "default": 600 },
+          "l1Tokens": { "type": "number", "minimum": 1, "default": 1800 },
+          "l2Tokens": { "type": "number", "minimum": 1, "default": 5000 }
+        }
+      },
+      "sidecar": {
+        "type": "object",
+        "required": ["baseUrl"],
+        "properties": {
+          "baseUrl": { "type": "string" },
+          "timeoutMs": { "type": "number", "minimum": 1000 }
+        }
+      },
+      "openviking": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "enum": ["local", "remote"] },
+          "basePath": { "type": "string" },
+          "targetRoot": { "type": "string" }
+        }
+      },
+      "graphify": {
+        "type": "object",
+        "properties": {
+          "basePath": { "type": "string" },
+          "autoBootstrap": { "type": "boolean" },
+          "autoRefresh": { "type": "string", "enum": ["manual", "on-demand", "scheduled"] }
+        }
+      },
+      "publishPolicy": {
+        "type": "object",
+        "properties": {
+          "defaultVisibility": {
+            "type": "string",
+            "enum": ["private", "project_shared", "org_shared"]
+          },
+          "allowOrgShared": { "type": "boolean" }
+        }
+      },
+      "observability": {
+        "type": "object",
+        "properties": {
+          "logLevel": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+          "emitMetrics": { "type": "boolean" }
+        }
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "health_status",
+      "description": "Returns the current health and configuration summary of the Memory Fabric plugin.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "memory_brief",
+      "description": "Generates a memory brief for the current agent and project context.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["agentId"],
+        "properties": {
+          "agentId": { "type": "string", "minLength": 1 },
+          "scope": { "type": "string", "enum": ["private", "project", "shared", "auto"] },
+          "projectId": { "type": "string" },
+          "depth": { "type": "string", "enum": ["l0", "l1", "l2"] },
+          "query": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "memory_commit",
+      "description": "Explicitly commits key memory items from the current session.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["agentId"],
+        "properties": {
+          "agentId": { "type": "string", "minLength": 1 },
+          "projectId": { "type": "string" },
+          "facts": { "type": "array", "items": { "type": "string" } },
+          "decisions": { "type": "array", "items": { "type": "string" } },
+          "entities": { "type": "array", "items": { "type": "string" } },
+          "patterns": { "type": "array", "items": { "type": "string" } },
+          "visibility": { "type": "string", "enum": ["private", "project_shared", "org_shared"] }
+        }
+      }
+    },
+    {
+      "name": "memory_publish_shared",
+      "description": "Publishes selected memory items to the project or org shared memory space.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId", "agentId", "items"],
+        "properties": {
+          "projectId": { "type": "string", "minLength": 1 },
+          "agentId": { "type": "string", "minLength": 1 },
+          "visibility": { "type": "string", "enum": ["project_shared", "org_shared"] },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["type", "content"],
+              "properties": {
+                "type": { "type": "string", "enum": ["fact", "decision", "entity", "pattern", "note"] },
+                "content": { "type": "string", "minLength": 1 },
+                "tags": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_forget_scoped",
+      "description": "Retracts (soft-deletes) shared memory entries matching the given query within a project scope.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId", "query"],
+        "properties": {
+          "projectId": { "type": "string", "minLength": 1 },
+          "agentId": { "type": "string" },
+          "query": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    {
+      "name": "project_bootstrap",
+      "description": "Initializes a project knowledge graph by scanning the given file paths with Graphify.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId", "paths"],
+        "properties": {
+          "projectId": { "type": "string", "minLength": 1 },
+          "paths": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+          "mode": { "type": "string", "enum": ["auto", "full"] }
+        }
+      }
+    },
+    {
+      "name": "project_state_refresh",
+      "description": "Returns the current structural brief (graph summary) for a project. Reads the existing graph without triggering a rebuild; use project_bootstrap to regenerate.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId"],
+        "properties": {
+          "projectId": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    {
+      "name": "project_graph_query",
+      "description": "Queries the project knowledge graph for nodes matching a semantic query.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId", "query"],
+        "properties": {
+          "projectId": { "type": "string", "minLength": 1 },
+          "query": { "type": "string", "minLength": 1 },
+          "budget": { "type": "number", "minimum": 1 }
+        }
+      }
+    },
+    {
+      "name": "project_graph_path",
+      "description": "Finds the shortest path between two nodes in the project knowledge graph.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId", "from", "to"],
+        "properties": {
+          "projectId": { "type": "string", "minLength": 1 },
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    {
+      "name": "project_graph_explain",
+      "description": "Returns a natural language explanation of a concept or relationship within the project graph.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["projectId", "query"],
+        "properties": {
+          "projectId": { "type": "string", "minLength": 1 },
+          "query": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    {
+      "name": "carrier_read",
+      "description": "Reads one or more stable carrier files for the given agent and project.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["agentId"],
+        "properties": {
+          "agentId": { "type": "string", "minLength": 1 },
+          "projectId": { "type": "string" },
+          "files": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    {
+      "name": "carrier_merge",
+      "description": "Merges patch content into one or more stable carrier files using per-file merge strategies.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["agentId", "patches"],
+        "properties": {
+          "agentId": { "type": "string", "minLength": 1 },
+          "projectId": { "type": "string" },
+          "patches": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["filename", "content"],
+              "properties": {
+                "filename": { "type": "string", "minLength": 1 },
+                "content": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "skills": [
+    { "name": "project-sensemaking", "path": "skills/project-sensemaking/SKILL.md" },
+    { "name": "memory-hygiene", "path": "skills/memory-hygiene/SKILL.md" },
+    { "name": "execution-gate", "path": "skills/execution-gate/SKILL.md" },
+    { "name": "post-task-distill", "path": "skills/post-task-distill/SKILL.md" }
+  ],
+  "hooks": [
+    { "event": "before_prompt_build", "handler": "hooks/before-prompt-build" },
+    { "event": "agent_end", "handler": "hooks/agent-end" },
+    { "event": "before_tool_call", "handler": "hooks/before-tool-call" },
+    { "event": "after_tool_call", "handler": "hooks/after-tool-call" }
+  ]
+}
