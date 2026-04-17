@@ -1,5 +1,5 @@
 import type { Logger } from "../utils/logger.js";
-import type { BeforeToolCallContext } from "./types.js";
+import type { BeforeToolCallEvent, HookAgentContext } from "./types.js";
 
 /**
  * High-value tool names worth observing for distill enrichment.
@@ -34,17 +34,16 @@ function isHighValue(toolName: string): boolean {
 }
 
 export function createBeforeToolCallHandler(logger: Logger) {
-  return function handleBeforeToolCall(ctx: BeforeToolCallContext): void {
-    if (!isHighValue(ctx.toolName)) return;
+  return function handleBeforeToolCall(event: BeforeToolCallEvent, ctx: HookAgentContext): void {
+    if (!isHighValue(event.toolName)) return;
 
     logger.debug("before_tool_call: high-value tool observed", {
       agentId: ctx.agentId,
-      projectId: ctx.projectId,
       hook: "before_tool_call",
-      tool: ctx.toolName,
+      tool: event.toolName,
       inputSummary:
-        typeof ctx.toolInput === "object" && ctx.toolInput !== null
-          ? Object.keys(ctx.toolInput as Record<string, unknown>).join(",")
+        typeof event.params === "object" && event.params !== null
+          ? Object.keys(event.params).join(",")
           : undefined
     } as Record<string, unknown>);
   };

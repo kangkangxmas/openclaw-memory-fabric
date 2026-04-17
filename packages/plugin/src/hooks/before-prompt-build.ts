@@ -1,4 +1,4 @@
-import type { BeforePromptBuildContext } from "./types.js";
+import type { BeforePromptBuildEvent, BeforePromptBuildResult, HookAgentContext } from "./types.js";
 import type { SidecarClient } from "../utils/sidecar-client.js";
 import type { Logger } from "../utils/logger.js";
 import type { MetricsCollector } from "../utils/metrics.js";
@@ -13,26 +13,29 @@ export function createBeforePromptBuildHandler(
 ) {
   const orchestrator = new RecallOrchestrator(client, config, metrics);
 
-  return async function beforePromptBuild(ctx: BeforePromptBuildContext): Promise<void> {
-    const latestUser = [...ctx.messages].reverse().find((m) => m.role === "user");
+  return async function beforePromptBuild(
+    event: BeforePromptBuildEvent,
+    ctx: HookAgentContext
+  ): Promise<BeforePromptBuildResult | void> {
+    const agentId = ctx.agentId ?? "unknown";
+    const messages = event.messages ?? [];
+    const latestUser = [...messages].reverse().find((m) => m.role === "user");
     const start = Date.now();
 
-    await client.carrierInit(ctx.agentId, ctx.projectId).catch(() => {
+    await client.carrierInit(agentId).catch(() => {
       /* non-fatal */
     });
 
     let result;
     try {
       result = await orchestrator.execute({
-        agentId: ctx.agentId,
-        projectId: ctx.projectId,
+        agentId,
         latestMessage: latestUser?.content,
-        messageCount: ctx.messages.length
+        messageCount: messages.length
       });
       metrics.recordRecall(Date.now() - start);
       logger.info("recall ok", {
-        agentId: ctx.agentId,
-        projectId: ctx.projectId,
+        agentId,
         hook: "before_prompt_build",
         latencyMs: Date.now() - start,
         sources: result.sources,
@@ -43,15 +46,14 @@ export function createBeforePromptBuildHandler(
       metrics.recordDegraded();
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn("recall failed — degraded mode", {
-        agentId: ctx.agentId,
+        agentId,
         hook: "before_prompt_build",
         degraded: true,
         error: msg
       } as Record<string, unknown>);
-      ctx.prependContext(
-        `<!-- memory-fabric: recall unavailable (${msg}) — proceeding without memory brief -->`
-      );
-      return;
+      return {
+        prependContext: `<!-- memory-fabric: recall unavailable (${msg}) — proceeding without memory brief -->`
+      };
     }
 
     const { brief, sources, plan } = result;
@@ -61,6 +63,6 @@ export function createBeforePromptBuildHandler(
       ""
     ].join("\n");
 
-    ctx.prependContext(header + brief + "\n<!-- memory-fabric:end -->");
+    return { prependContext: header + brief + "\n<!-- memory-fabric:end -->" };
   };
 }

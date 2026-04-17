@@ -1,10 +1,12 @@
 /**
- * OpenClaw hook context types.
+ * OpenClaw hook types — aligned with the SDK's PluginHookHandlerMap contract.
  *
- * These interfaces mirror the hook context objects provided by the OpenClaw
- * gateway at runtime. The actual shape is determined by the OpenClaw plugin
- * API; these definitions are designed to align with the documented hook events
- * while remaining compatible with the broader plugin architecture.
+ * Each hook receives two arguments: (event, ctx).
+ *   event — payload specific to the hook (prompt, messages, tool name, …)
+ *   ctx   — agent-level context shared across hooks (agentId, sessionKey, …)
+ *
+ * before_prompt_build returns { prependContext?: string } instead of calling
+ * a prependContext() function.
  */
 
 export interface HookMessage {
@@ -18,57 +20,87 @@ export interface HookToolCall {
   result?: unknown;
 }
 
-/** Context passed to the `before_prompt_build` hook */
-export interface BeforePromptBuildContext {
-  /** Identifier of the current agent */
-  agentId: string;
-  /** Active project identifier, if any */
-  projectId?: string;
-  /** Message history so far in this session */
-  messages: HookMessage[];
-  /**
-   * Prepend plain text to the system prompt / context window.
-   * Called by the hook to inject the Memory Brief.
-   */
-  prependContext: (text: string) => void;
+/** Shared agent-level context passed as the second argument to every hook */
+export interface HookAgentContext {
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  workspaceDir?: string;
+  channelId?: string;
+  trigger?: string;
 }
 
-/** Context passed to the `agent_end` hook */
-export interface AgentEndContext {
-  /** Identifier of the current agent */
-  agentId: string;
-  /** Active project identifier, if any */
-  projectId?: string;
-  /** Full message history for the completed turn */
+/** event argument for `before_prompt_build` */
+export interface BeforePromptBuildEvent {
+  prompt: string;
   messages: HookMessage[];
-  /** Tool calls made during this turn */
+}
+
+/** Return value for `before_prompt_build` — content is injected via fields */
+export interface BeforePromptBuildResult {
+  prependContext?: string;
+}
+
+/** event argument for `agent_end` */
+export interface AgentEndEvent {
+  messages: HookMessage[];
   toolCalls?: HookToolCall[];
 }
 
-/** Context passed to the `before_tool_call` hook */
-export interface BeforeToolCallContext {
-  /** Identifier of the current agent */
-  agentId: string;
-  /** Active project identifier, if any */
-  projectId?: string;
-  /** The tool about to be called */
+/** event argument for `before_tool_call` */
+export interface BeforeToolCallEvent {
   toolName: string;
-  /** The input arguments for the tool */
+  params: Record<string, unknown>;
+  runId?: string;
+  toolCallId?: string;
+}
+
+/** event argument for `after_tool_call` */
+export interface AfterToolCallEvent {
+  toolName: string;
+  params: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  durationMs?: number;
+  runId?: string;
+  toolCallId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Legacy aliases — kept so internal helpers that still use the old flat shape
+// can be migrated incrementally without breaking the build.
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use BeforePromptBuildEvent + HookAgentContext separately */
+export interface BeforePromptBuildContext {
+  agentId: string;
+  projectId?: string;
+  messages: HookMessage[];
+  prependContext: (text: string) => void;
+}
+
+/** @deprecated Use AgentEndEvent + HookAgentContext separately */
+export interface AgentEndContext {
+  agentId: string;
+  projectId?: string;
+  messages: HookMessage[];
+  toolCalls?: HookToolCall[];
+}
+
+/** @deprecated Use BeforeToolCallEvent + HookAgentContext separately */
+export interface BeforeToolCallContext {
+  agentId: string;
+  projectId?: string;
+  toolName: string;
   toolInput?: unknown;
 }
 
-/** Context passed to the `after_tool_call` hook */
+/** @deprecated Use AfterToolCallEvent + HookAgentContext separately */
 export interface AfterToolCallContext {
-  /** Identifier of the current agent */
   agentId: string;
-  /** Active project identifier, if any */
   projectId?: string;
-  /** The tool that was called */
   toolName: string;
-  /** The input arguments passed to the tool */
   toolInput?: unknown;
-  /** The result returned by the tool */
   toolResult?: unknown;
-  /** Execution duration in milliseconds */
   durationMs?: number;
 }

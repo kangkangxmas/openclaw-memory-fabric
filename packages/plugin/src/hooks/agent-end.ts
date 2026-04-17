@@ -1,4 +1,4 @@
-import type { AgentEndContext } from "./types.js";
+import type { AgentEndEvent, HookAgentContext } from "./types.js";
 import type { SidecarClient } from "../utils/sidecar-client.js";
 import type { Logger } from "../utils/logger.js";
 import type { MetricsCollector } from "../utils/metrics.js";
@@ -11,22 +11,22 @@ export function createAgentEndHandler(
 ) {
   const orchestrator = new CommitOrchestrator(client, metrics);
 
-  return async function agentEnd(ctx: AgentEndContext): Promise<void> {
-    const assistantTurns = ctx.messages.filter((m) => m.role === "assistant");
+  return async function agentEnd(event: AgentEndEvent, ctx: HookAgentContext): Promise<void> {
+    const agentId = ctx.agentId ?? "unknown";
+    const messages = event.messages ?? [];
+    const assistantTurns = messages.filter((m) => m.role === "assistant");
     if (assistantTurns.length === 0) return;
 
     const start = Date.now();
     try {
       await orchestrator.execute({
-        agentId: ctx.agentId,
-        projectId: ctx.projectId,
-        messages: ctx.messages,
-        toolCalls: ctx.toolCalls
+        agentId,
+        messages,
+        toolCalls: event.toolCalls
       });
       metrics.recordCommit(Date.now() - start);
       logger.info("commit ok", {
-        agentId: ctx.agentId,
-        projectId: ctx.projectId,
+        agentId,
         hook: "agent_end",
         latencyMs: Date.now() - start
       });
@@ -34,7 +34,7 @@ export function createAgentEndHandler(
       metrics.recordCommit(Date.now() - start, true);
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn("agent_end commit failed — non-fatal", {
-        agentId: ctx.agentId,
+        agentId,
         hook: "agent_end",
         error: msg
       } as Record<string, unknown>);

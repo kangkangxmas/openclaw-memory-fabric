@@ -1,5 +1,5 @@
 import type { Logger } from "../utils/logger.js";
-import type { AfterToolCallContext } from "./types.js";
+import type { AfterToolCallEvent, HookAgentContext } from "./types.js";
 
 /** Summarise a tool result to avoid flooding the log with large payloads */
 function summarise(result: unknown): string {
@@ -15,14 +15,13 @@ function summarise(result: unknown): string {
 }
 
 export function createAfterToolCallHandler(logger: Logger) {
-  return function handleAfterToolCall(ctx: AfterToolCallContext): void {
+  return function handleAfterToolCall(event: AfterToolCallEvent, ctx: HookAgentContext): void {
     logger.debug("after_tool_call", {
       agentId: ctx.agentId,
-      projectId: ctx.projectId,
       hook: "after_tool_call",
-      tool: ctx.toolName,
-      latencyMs: ctx.durationMs,
-      resultSummary: summarise(ctx.toolResult)
+      tool: event.toolName,
+      latencyMs: event.durationMs,
+      resultSummary: summarise(event.result)
     } as Record<string, unknown>);
   };
 }
