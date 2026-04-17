@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { BeforePromptBuildEvent, BeforePromptBuildResult, HookAgentContext } from "./types.js";
 import type { SidecarClient } from "../utils/sidecar-client.js";
 import type { Logger } from "../utils/logger.js";
@@ -33,11 +34,12 @@ export function createBeforePromptBuildHandler(
     ctx: HookAgentContext
   ): Promise<BeforePromptBuildResult | void> {
     const agentId = ctx.agentId ?? "unknown";
+    const projectId = ctx.workspaceDir ? path.basename(ctx.workspaceDir) : undefined;
     const messages = event.messages ?? [];
     const latestUser = [...messages].reverse().find((m) => m.role === "user");
     const start = Date.now();
 
-    await client.carrierInit(agentId).catch(() => {
+    await client.carrierInit(agentId, projectId).catch(() => {
       /* non-fatal */
     });
 
@@ -45,6 +47,7 @@ export function createBeforePromptBuildHandler(
     try {
       result = await orchestrator.execute({
         agentId,
+        projectId,
         latestMessage: latestUser ? extractTextContent(latestUser.content) : undefined,
         messageCount: messages.length
       });

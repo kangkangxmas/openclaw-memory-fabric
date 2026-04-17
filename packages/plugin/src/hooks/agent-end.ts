@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { AgentEndEvent, HookAgentContext, HookMessage } from "./types.js";
 import type { SidecarClient } from "../utils/sidecar-client.js";
 import type { Logger } from "../utils/logger.js";
@@ -31,6 +32,7 @@ export function createAgentEndHandler(
 
   return async function agentEnd(event: AgentEndEvent, ctx: HookAgentContext): Promise<void> {
     const agentId = ctx.agentId ?? "unknown";
+    const projectId = ctx.workspaceDir ? path.basename(ctx.workspaceDir) : undefined;
     const messages = normaliseMessages(event.messages ?? []);
     const assistantTurns = messages.filter((m) => m.role === "assistant");
     if (assistantTurns.length === 0) return;
@@ -39,6 +41,7 @@ export function createAgentEndHandler(
     try {
       await orchestrator.execute({
         agentId,
+        projectId,
         messages,
         toolCalls: event.toolCalls
       });
