@@ -106,3 +106,19 @@ export function createPlugin(userConfig?: Partial<MemoryFabricConfig>) {
 export function createPluginScaffold() {
   return createPlugin();
 }
+
+/**
+ * OpenClaw plugin entry point.
+ * The gateway resolves `register` (or `activate`) from the module export.
+ */
+export function register(api: {
+  on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
+  registerTool: (tool: unknown) => void;
+}) {
+  const instance = createPlugin();
+
+  api.on("before_prompt_build", instance.hooks.before_prompt_build as (event: unknown, ctx: unknown) => unknown);
+  api.on("agent_end", instance.hooks.agent_end as (event: unknown, ctx: unknown) => unknown);
+  api.on("before_tool_call", instance.hooks.before_tool_call as (event: unknown, ctx: unknown) => unknown);
+  api.on("after_tool_call", instance.hooks.after_tool_call as (event: unknown, ctx: unknown) => unknown);
+}
