@@ -5,6 +5,21 @@ import type { MetricsCollector } from "../utils/metrics.js";
 import { RecallOrchestrator } from "../orchestrator/recall-orchestrator.js";
 import type { MemoryFabricConfig } from "../types/index.js";
 
+/**
+ * Extract a plain-text string from a message content value.
+ * Handles string, array-of-parts (multi-modal), and unknown shapes.
+ */
+function extractTextContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part === "string" ? part : (part as { text?: string })?.text ?? ""))
+      .join(" ")
+      .trim();
+  }
+  return "";
+}
+
 export function createBeforePromptBuildHandler(
   client: SidecarClient,
   config: MemoryFabricConfig,
@@ -30,7 +45,7 @@ export function createBeforePromptBuildHandler(
     try {
       result = await orchestrator.execute({
         agentId,
-        latestMessage: latestUser?.content,
+        latestMessage: latestUser ? extractTextContent(latestUser.content) : undefined,
         messageCount: messages.length
       });
       metrics.recordRecall(Date.now() - start);

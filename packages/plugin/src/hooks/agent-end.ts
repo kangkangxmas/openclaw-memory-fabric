@@ -1,8 +1,26 @@
-import type { AgentEndEvent, HookAgentContext } from "./types.js";
+import type { AgentEndEvent, HookAgentContext, HookMessage } from "./types.js";
 import type { SidecarClient } from "../utils/sidecar-client.js";
 import type { Logger } from "../utils/logger.js";
 import type { MetricsCollector } from "../utils/metrics.js";
 import { CommitOrchestrator } from "../orchestrator/commit-orchestrator.js";
+
+/**
+ * Normalise a raw SDK message array so every content value is a plain string.
+ * Multi-modal messages (content = array-of-parts) are collapsed to their text.
+ */
+function normaliseMessages(raw: HookMessage[]): HookMessage[] {
+  return raw.map((m) => {
+    if (typeof m.content === "string") return m;
+    if (Array.isArray(m.content)) {
+      const text = (m.content as Array<{ text?: string } | string>)
+        .map((p) => (typeof p === "string" ? p : p?.text ?? ""))
+        .join(" ")
+        .trim();
+      return { ...m, content: text };
+    }
+    return { ...m, content: String(m.content ?? "") };
+  });
+}
 
 export function createAgentEndHandler(
   client: SidecarClient,
@@ -13,7 +31,7 @@ export function createAgentEndHandler(
 
   return async function agentEnd(event: AgentEndEvent, ctx: HookAgentContext): Promise<void> {
     const agentId = ctx.agentId ?? "unknown";
-    const messages = event.messages ?? [];
+    const messages = normaliseMessages(event.messages ?? []);
     const assistantTurns = messages.filter((m) => m.role === "assistant");
     if (assistantTurns.length === 0) return;
 
