@@ -13,12 +13,16 @@ import type { FastifyInstance, FastifyError } from "fastify";
 import { OpenVikingService } from "../src/services/openviking-service.js";
 import { CarrierRepository } from "../src/services/carrier-service.js";
 import { DistillService } from "../src/services/distill-service.js";
+import { GraphifyService } from "../src/services/graphify-service.js";
 import { SharedService } from "../src/services/shared-service.js";
 import { registerHealthRoute } from "../src/routes/health.js";
 import { registerRecallRoute } from "../src/routes/recall.js";
 import { registerCommitRoute } from "../src/routes/commit.js";
 import { registerCarrierRoutes } from "../src/routes/carrier.js";
 import { registerDistillRoute } from "../src/routes/distill.js";
+import { registerBootstrapRoute } from "../src/routes/bootstrap.js";
+import { registerGraphRoutes } from "../src/routes/graph.js";
+import { registerInspectRoutes } from "../src/routes/inspect.js";
 import { registerSharedRoutes } from "../src/routes/shared.js";
 import type { ErrorResponse } from "../src/models/index.js";
 
@@ -36,6 +40,7 @@ async function buildTestApp(tmpDir: string): Promise<FastifyInstance> {
   const openviking = new OpenVikingService(cfg);
   const carriers = new CarrierRepository(join(tmpDir, "carriers"));
   const distill = new DistillService();
+  const graphify = new GraphifyService(join(tmpDir, "graphs"));
   const shared = new SharedService(join(tmpDir, "carriers"));
 
   const app = Fastify({ logger: false });
@@ -63,6 +68,9 @@ async function buildTestApp(tmpDir: string): Promise<FastifyInstance> {
   registerCommitRoute(app, openviking);
   registerCarrierRoutes(app, carriers);
   registerDistillRoute(app, distill);
+  registerBootstrapRoute(app, graphify);
+  registerGraphRoutes(app, graphify);
+  registerInspectRoutes(app, openviking, graphify);
   registerSharedRoutes(app, shared);
 
   await app.ready();
@@ -288,6 +296,97 @@ describe("POST /carrier/init and /carrier/read", () => {
     const body = JSON.parse(res.body) as { carriers: Array<{ filename: string; exists: boolean }> };
     assert.ok(body.carriers.length === 2);
     assert.ok(body.carriers.every((c) => typeof c.filename === "string"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /inspect and inspect routes
+// ---------------------------------------------------------------------------
+
+describe("Inspector routes", () => {
+  let app: FastifyInstance;
+  let tmpDir: string;
+
+  before(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "sidecar-inspect-"));
+    app = await buildTestApp(tmpDir);
+  });
+  after(async () => {
+    await app.close();
+    await rm(tmpDir, { recursive: true });
+  });
+
+  it("serves the inspector web page", async () => {
+    const res = await app.inject({ method: "GET", url: "/inspect" });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.headers["content-type"]?.includes("text/html"));
+    assert.ok(res.body.includes("Memory Fabric"));
+    assert.ok(res.body.includes("Load Full Snapshot"));
+  });
+
+  it("returns raw memory entries for an agent/project", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/commit",
+      payload: {
+        agentId: "agent-im",
+        projectId: "proj-im",
+        facts: ["fact one"],
+        decisions: ["keep the sidecar local"]
+      }
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/inspect/memories",
+      payload: {
+        agentId: "agent-im",
+        projectId: "proj-im",
+        scope: "project",
+        limit: 10
+      }
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body) as {
+      totalEntries: number;
+      entries: Array<{ content: string }>;
+      scopesRead: string[];
+    };
+    assert.equal(body.totalEntries, 2);
+    assert.ok(body.entries.some((entry) => entry.content.includes("fact one")));
+    assert.ok(body.scopesRead.includes("project"));
+  });
+
+  it("returns graph snapshot details after bootstrap", async () => {
+    const sampleDir = join(tmpDir, "workspace");
+    await app.inject({
+      method: "POST",
+      url: "/bootstrap",
+      payload: {
+        projectId: "proj-graph",
+        paths: [sampleDir],
+        mode: "full"
+      }
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/inspect/graph",
+      payload: { projectId: "proj-graph" }
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body) as {
+      exists: boolean;
+      projectId: string;
+      nodeCount: number;
+      edgeCount: number;
+      report: string;
+    };
+    assert.equal(body.exists, true);
+    assert.equal(body.projectId, "proj-graph");
+    assert.ok(body.nodeCount >= 0);
+    assert.ok(body.edgeCount >= 0);
+    assert.ok(body.report.includes("GRAPH REPORT"));
   });
 });
 

@@ -12,6 +12,7 @@ import { registerCarrierRoutes } from "./routes/carrier.js";
 import { registerDistillRoute } from "./routes/distill.js";
 import { registerBootstrapRoute } from "./routes/bootstrap.js";
 import { registerGraphRoutes } from "./routes/graph.js";
+import { registerInspectRoutes } from "./routes/inspect.js";
 import { registerSharedRoutes } from "./routes/shared.js";
 import type { ErrorResponse } from "./models/index.js";
 
@@ -45,6 +46,7 @@ export async function buildServer() {
   registerDistillRoute(app, distill);
   registerBootstrapRoute(app, graphify);
   registerGraphRoutes(app, graphify);
+  registerInspectRoutes(app, openviking, graphify);
   registerSharedRoutes(app, shared);
 
   return { app, cfg };

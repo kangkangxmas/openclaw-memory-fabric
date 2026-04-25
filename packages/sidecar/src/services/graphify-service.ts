@@ -57,6 +57,18 @@ export interface StructuralBrief {
   summary: string;
 }
 
+export interface GraphInspectResult {
+  exists: boolean;
+  projectId: string;
+  generatedAt?: string;
+  fileCount: number;
+  nodeCount: number;
+  edgeCount: number;
+  report: string;
+  topNodes: GraphNode[];
+  topEdges: GraphEdge[];
+}
+
 // ---------------------------------------------------------------------------
 // File scanner helpers
 // ---------------------------------------------------------------------------
@@ -433,6 +445,40 @@ export class GraphifyService {
     ].join("\n");
 
     return { node, neighbors, edges: relatedEdges, explanation };
+  }
+
+  async inspectProjectGraph(projectId: string): Promise<GraphInspectResult> {
+    validateId(projectId, "projectId");
+    const graphPath = this.graphJsonPath(projectId);
+    const reportPath = this.reportPath(projectId);
+
+    if (!existsSync(graphPath)) {
+      return {
+        exists: false,
+        projectId,
+        fileCount: 0,
+        nodeCount: 0,
+        edgeCount: 0,
+        report: "No graph available. Run project_bootstrap first.",
+        topNodes: [],
+        topEdges: []
+      };
+    }
+
+    const graph = await this.loadGraph(projectId);
+    const report = existsSync(reportPath) ? await readFile(reportPath, "utf8") : this.generateReport(graph);
+
+    return {
+      exists: true,
+      projectId,
+      generatedAt: graph.generatedAt,
+      fileCount: graph.fileCount,
+      nodeCount: graph.nodes.length,
+      edgeCount: graph.edges.length,
+      report,
+      topNodes: graph.nodes.slice(0, 24),
+      topEdges: graph.edges.slice(0, 24)
+    };
   }
 
   // -------------------------------------------------------------------------

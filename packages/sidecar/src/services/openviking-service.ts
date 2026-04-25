@@ -49,6 +49,15 @@ export interface CommitResult {
   uri: string;
 }
 
+export interface MemoryInspectResult {
+  agentId: string;
+  projectId?: string;
+  scope: MemoryScope;
+  entries: MemoryEntry[];
+  totalEntries: number;
+  scopesRead: MemoryScope[];
+}
+
 // ---------------------------------------------------------------------------
 // Depth token budget
 // ---------------------------------------------------------------------------
@@ -261,6 +270,58 @@ export class OpenVikingService {
     } catch {
       return "";
     }
+  }
+
+  async inspectMemory(opts: {
+    agentId: string;
+    projectId?: string;
+    scope?: string;
+    query?: string;
+    limit?: number;
+  }): Promise<MemoryInspectResult> {
+    const { agentId, projectId, query = "" } = opts;
+    const scope = resolveScope(opts.scope);
+    const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
+    const scopesToRead = this.buildReadScopes(scope, !!projectId);
+
+    const allEntries: MemoryEntry[] = [];
+    for (const s of scopesToRead) {
+      try {
+        const dir = resolveScopePath({
+          basePath: this.cfg.basePath,
+          targetRoot: this.cfg.targetRoot,
+          agentId,
+          scope: s,
+          projectId
+        });
+        const memoriesPath = join(dir, "memories.jsonl");
+        const entries = await readJsonl<MemoryEntry>(memoriesPath);
+        allEntries.push(...entries);
+      } catch {
+        // scope path may not exist yet — skip gracefully
+      }
+    }
+
+    const normalizedQuery = query.trim().toLowerCase();
+    const filtered = normalizedQuery
+      ? allEntries.filter((entry) => {
+          const haystack = `${entry.type} ${entry.content} ${(entry.tags ?? []).join(" ")}`.toLowerCase();
+          return haystack.includes(normalizedQuery);
+        })
+      : allEntries;
+
+    const sorted = filtered.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    return {
+      agentId,
+      projectId,
+      scope,
+      entries: sorted.slice(0, limit),
+      totalEntries: filtered.length,
+      scopesRead: scopesToRead
+    };
   }
 
   // -------------------------------------------------------------------------
