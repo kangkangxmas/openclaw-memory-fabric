@@ -249,8 +249,9 @@ PORT=7811
 LOG_LEVEL=info
 OPENVIKING_MODE=local
 OPENVIKING_BASE_PATH=/opt/openclaw/openviking
+OPENVIKING_TARGET_ROOT=viking://org/acme
 GRAPHIFY_BASE_PATH=/opt/openclaw/memory-fabric/data/graph
-CARRIER_BASE_PATH=/opt/openclaw/memory-fabric/data/carriers
+CARRIERS_ROOT=/opt/openclaw/memory-fabric/data/carriers
 ```
 
 ### 10.2 启动
@@ -272,9 +273,20 @@ curl http://127.0.0.1:7811/health
 ```json
 {
   "ok": true,
-  "openviking": "reachable",
-  "graphify": "available",
-  "carrierPath": "ready"
+  "service": "@openclaw-memory-fabric/sidecar",
+  "version": "1.6.0",
+  "phase": "phase-14-gap-closure",
+  "components": {
+    "openviking": {
+      "reachable": true
+    },
+    "graphify": {
+      "available": true
+    },
+    "carriers": {
+      "writable": true
+    }
+  }
 }
 ```
 
