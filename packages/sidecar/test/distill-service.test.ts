@@ -53,6 +53,50 @@ describe("DistillService.distill()", () => {
     assert.ok(out.entities.includes("DistillService"));
   });
 
+  it("filters generic entities and noisy quoted fragments", () => {
+    const out = svc.distill({
+      messages: [
+        msg(
+          "assistant",
+          'User and Agent reviewed the result. 「你应该在这些时机执行蒸馏」 and 「AI 员工」 are instructions, while "NodeNext" is the real config token. No memories found.'
+        )
+      ]
+    });
+    assert.ok(!out.entities.includes("User"));
+    assert.ok(!out.entities.includes("Agent"));
+    assert.ok(!out.entities.includes("你应该在这些时机执行蒸馏"));
+    assert.ok(!out.entities.includes("AI 员工"));
+    assert.ok(!out.entities.includes("No memories found"));
+    assert.ok(out.entities.includes("NodeNext"));
+  });
+
+  it("filters low-signal decision fragments while keeping substantive decisions", () => {
+    const out = svc.distill({
+      messages: [
+        msg(
+          "assistant",
+          "Decision: scope 和 depth：. After analysis, we decided to use JSONL format for persistent storage across the sidecar and plugin."
+        )
+      ]
+    });
+    assert.ok(!out.decisions.includes("scope 和 depth："));
+    assert.ok(out.decisions.some((decision) => decision.toLowerCase().includes("jsonl")));
+  });
+
+  it("filters truncated markdown and token-only decisions", () => {
+    const out = svc.distill({
+      messages: [
+        msg(
+          "assistant",
+          '选择 `minimax/MiniMax-M2`。** 既然重启 Gateway 后我当前这个会话就断了，不如：。已决定保留现有 Gateway 配置，并只修正 launchd 环境变量注入。'
+        )
+      ]
+    });
+    assert.ok(!out.decisions.includes("minimax/MiniMax-M2"));
+    assert.ok(!out.decisions.some((decision) => decision.includes("不如")));
+    assert.ok(out.decisions.some((decision) => decision.includes("launchd")));
+  });
+
   it("extracts unresolved items", () => {
     const out = svc.distill({
       messages: [

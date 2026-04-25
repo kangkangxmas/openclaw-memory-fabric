@@ -16,6 +16,46 @@ export interface CommitResult {
   selfModelUpdated: boolean;
 }
 
+const ENTITY_STOPWORDS = new Set([
+  "agent",
+  "assistant",
+  "config",
+  "content",
+  "context",
+  "data",
+  "entities",
+  "entity",
+  "error",
+  "info",
+  "none",
+  "pattern",
+  "patterns",
+  "result",
+  "state",
+  "system",
+  "type",
+  "types",
+  "unresolved",
+  "user",
+  "记录",
+  "模式",
+  "策略",
+  "方案",
+  "问题",
+  "建议",
+  "注意"
+]);
+
+function isCleanEntity(value: string): boolean {
+  const normalized = value.trim();
+  if (normalized.length < 3 || normalized.length > 40) return false;
+  if (ENTITY_STOPWORDS.has(normalized.toLowerCase())) return false;
+  if (/^(no memories found|auto-distilled from session)$/i.test(normalized)) return false;
+  if (/[`#*<>[\]{}]/.test(normalized)) return false;
+  if (/(你应该|这些时机|请使用|need to|should use)/i.test(normalized)) return false;
+  return true;
+}
+
 export class CommitOrchestrator {
   constructor(
     private readonly client: SidecarClient,
@@ -24,11 +64,15 @@ export class CommitOrchestrator {
 
   async execute(ctx: CommitContext): Promise<CommitResult> {
     // Step 1: Distill the conversation
-    const distilled = await this.client.distill({
+    const rawDistilled = await this.client.distill({
       agentId: ctx.agentId,
       projectId: ctx.projectId,
       messages: ctx.messages
     });
+    const distilled: DistillResponse = {
+      ...rawDistilled,
+      entities: rawDistilled.entities.filter((entity) => isCleanEntity(entity))
+    };
 
     // Step 2: Commit to OpenViking
     const commitResp = await this.client.commit({

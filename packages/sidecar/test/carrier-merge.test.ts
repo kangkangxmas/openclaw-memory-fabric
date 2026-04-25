@@ -121,6 +121,28 @@ describe("CarrierRepository.merge() — dedup-append strategy", () => {
     assert.ok(content.includes("NodeA"));
     assert.ok(content.includes("NodeB"));
   });
+
+  it("skips low-quality short lines but keeps valid auto-extracted entries", async () => {
+    await repo.initAgent("agent-dd3");
+    await repo.initProject("agent-dd3", "proj-dd3");
+    await repo.merge({
+      agentId: "agent-dd3",
+      projectId: "proj-dd3",
+      patches: [
+        {
+          filename: "entities-glossary.md",
+          content: "- x\n- **DistillService**: (auto-extracted)\n..."
+        }
+      ]
+    });
+    const content = readFileSync(
+      join(tmpDir, "agents", "agent-dd3", "projects", "proj-dd3", "entities-glossary.md"),
+      "utf8"
+    );
+    assert.ok(!content.includes("- x"));
+    assert.ok(!content.includes("\n...\n"));
+    assert.ok(content.includes("DistillService"));
+  });
 });
 
 describe("CarrierRepository.merge() — ordered-accumulate strategy", () => {
@@ -144,6 +166,29 @@ describe("CarrierRepository.merge() — ordered-accumulate strategy", () => {
     const idx1 = content.indexOf("2026-04-16");
     const idx2 = content.indexOf("2026-04-15");
     assert.ok(idx1 < idx2, "latest entry should appear before earlier entry");
+  });
+
+  it("does not duplicate the same decision entry", async () => {
+    await repo.initAgent("agent-oa2");
+    await repo.initProject("agent-oa2", "proj-oa2");
+    const entry =
+      "## 2026-04-16: Use JSONL\n**Context:** Auto-distilled from session\n**Decision:** Use JSONL format for persistent storage\n**Rationale:** See execution journal\n";
+    await repo.merge({
+      agentId: "agent-oa2",
+      projectId: "proj-oa2",
+      patches: [{ filename: "decision-log.md", content: entry }]
+    });
+    await repo.merge({
+      agentId: "agent-oa2",
+      projectId: "proj-oa2",
+      patches: [{ filename: "decision-log.md", content: entry }]
+    });
+    const content = readFileSync(
+      join(tmpDir, "agents", "agent-oa2", "projects", "proj-oa2", "decision-log.md"),
+      "utf8"
+    );
+    const occurrences = (content.match(/Use JSONL format for persistent storage/g) ?? []).length;
+    assert.equal(occurrences, 1);
   });
 });
 

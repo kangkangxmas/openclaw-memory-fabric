@@ -43,7 +43,7 @@ const ENTITY_PATTERNS = [
   // CamelCase identifiers (likely code symbols / service names)
   /\b([A-Z][a-zA-Z]{2,}(?:Service|Client|Handler|Manager|Controller|Adapter|Repository|Model|Store))\b/g,
   // Quoted terms
-  /「(.{2,20})」/g,
+  /「([^「」\n]{2,20})」/g,
   /"([A-Za-z][a-zA-Z0-9_-]{2,30})"/g
 ];
 
@@ -57,6 +57,53 @@ const UNRESOLVED_MARKERS = [
   /(?:需要确认|need to confirm|TBD|TODO|需要验证)\s*[:：]?\s*(.+)/i,
   /\?\s*(.{10,})\s*\?/
 ];
+
+const ENTITY_STOPWORDS = new Set([
+  "action",
+  "agent",
+  "array",
+  "assistant",
+  "boolean",
+  "config",
+  "content",
+  "context",
+  "data",
+  "date",
+  "entity",
+  "entities",
+  "error",
+  "event",
+  "false",
+  "function",
+  "info",
+  "none",
+  "number",
+  "object",
+  "option",
+  "options",
+  "param",
+  "params",
+  "pattern",
+  "patterns",
+  "promise",
+  "props",
+  "result",
+  "state",
+  "string",
+  "system",
+  "true",
+  "type",
+  "types",
+  "unresolved",
+  "user",
+  "记录",
+  "模式",
+  "策略",
+  "方案",
+  "问题",
+  "建议",
+  "注意"
+]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -80,6 +127,69 @@ function extractAllGlobal(text: string, patterns: RegExp[]): string[] {
     }
   }
   return [...result];
+}
+
+function normalizeText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeDecision(value: string): string {
+  return normalizeText(value)
+    .replace(/^[`"'“”‘’*#>\-:\s]+|[`"'“”‘’*#>\-:\s]+$/g, "")
+    .trim();
+}
+
+function normalizeEntity(value: string): string {
+  return normalizeText(value).replace(/^[`"'“”‘’「」]+|[`"'“”‘’「」]+$/g, "");
+}
+
+function isLikelyUsefulDecision(value: string): boolean {
+  const normalized = normalizeDecision(value);
+  if (normalized.length < 12 || normalized.length > 200) return false;
+  if (/[：:]$/.test(normalized)) return false;
+  if (!/[\p{Script=Han}A-Za-z]/u.test(normalized)) return false;
+  if (/^[A-Za-z0-9./_-]+$/.test(normalized)) return false;
+  if (/^[A-Za-z0-9./_-]+\s+[A-Za-z0-9./_-]+$/.test(normalized)) return false;
+  if (/^(scope|depth|context|strategy|option|pattern)\b[\s/&-]*(scope|depth|context|strategy)?[:：]?$/i.test(normalized)) {
+    return false;
+  }
+
+  let signal = 0;
+  if (/[\p{Script=Han}]/u.test(normalized)) signal += 1;
+  if (
+    /\b(use|using|adopt|adopting|switch|switching|migrate|migrating|keep|keeping|remove|removing|replace|replacing)\b/i.test(
+      normalized
+    ) ||
+    /(采用|选择|改为|迁移|保留|移除|替换|使用)/.test(normalized)
+  ) {
+    signal += 1;
+  }
+  if (/\b[A-Z]{2,}\b|[A-Z][a-zA-Z]+(?:Service|Client|Handler|Manager|Controller|Adapter|Repository|Model|Store)?|[a-z]+[_-][a-z0-9_-]+/.test(normalized)) {
+    signal += 1;
+  }
+  if (normalized.includes(" ")) signal += 1;
+  if (/[，。；;]/.test(normalized)) signal += 1;
+
+  return signal >= 2;
+}
+
+function isLikelyEntity(value: string): boolean {
+  const normalized = normalizeEntity(value);
+  if (normalized.length < 3 || normalized.length > 40) return false;
+  if (/^[\s\p{P}]+$/u.test(normalized)) return false;
+  if (/[`#*<>[\]{}]/.test(normalized)) return false;
+  if (/^(no memories found|auto-distilled from session)$/i.test(normalized)) return false;
+  if (/(你应该|这些时机|请使用|need to|should use)/i.test(normalized)) return false;
+  if (ENTITY_STOPWORDS.has(normalized.toLowerCase())) return false;
+
+  const hasHan = /[\p{Script=Han}]/u.test(normalized);
+  if (hasHan) {
+    if (/[：。！？?]/u.test(normalized)) return false;
+    if (/\s/u.test(normalized)) return false;
+    return /[\p{Script=Han}]{2,}/u.test(normalized);
+  }
+
+  return /^[A-Za-z][A-Za-z0-9_-]{2,30}$/.test(normalized);
 }
 
 function splitIntoSentences(text: string): string[] {
@@ -113,7 +223,9 @@ export class DistillService {
     for (const text of cleanedMessages) {
       for (const sentence of splitIntoSentences(text)) {
         const decision = extractFirst(sentence, DECISION_PATTERNS);
-        if (decision) decisions.push(decision);
+        if (decision && isLikelyUsefulDecision(decision)) {
+          decisions.push(normalizeDecision(decision));
+        }
 
         const fact = extractFirst(sentence, FACT_PATTERNS);
         if (fact) facts.push(fact);
@@ -126,7 +238,10 @@ export class DistillService {
       }
 
       // Entity extraction runs on full message text
-      extractAllGlobal(text, ENTITY_PATTERNS).forEach((e) => entities.push(e));
+      extractAllGlobal(text, ENTITY_PATTERNS)
+        .map((e) => normalizeEntity(e))
+        .filter((e) => isLikelyEntity(e))
+        .forEach((e) => entities.push(e));
     }
 
     // Deduplicate preserving insertion order

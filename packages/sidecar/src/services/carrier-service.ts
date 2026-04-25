@@ -22,6 +22,40 @@ interface CarrierDef {
   template: string;
 }
 
+function normalizeMergeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\*\*/g, "")
+    .replace(/[`#>-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isUsefulAppendLine(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length < 5) return false;
+  if (/^[\s\p{P}]+$/u.test(trimmed)) return false;
+  return true;
+}
+
+function decisionEntryKey(value: string): string {
+  const decisionLine = value
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("**Decision:**"));
+  if (decisionLine) {
+    return normalizeMergeText(decisionLine.replace("**Decision:**", ""));
+  }
+
+  const heading = value
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("## "));
+  if (!heading) return normalizeMergeText(value).slice(0, 160);
+
+  return normalizeMergeText(heading.replace(/^##\s+\d{4}-\d{2}-\d{2}:\s*/, ""));
+}
+
 const PRIVATE_CARRIERS: CarrierDef[] = [
   {
     filename: "identity.md",
@@ -323,7 +357,8 @@ export class CarrierRepository {
         );
         const newLines = incoming
           .split("\n")
-          .filter((l) => l.trim() && !existingLines.has(l.trim()));
+          .map((l) => l.trim())
+          .filter((l) => isUsefulAppendLine(l) && !existingLines.has(l));
         if (newLines.length === 0) break;
         await writeFile(filePath, existing.trimEnd() + "\n" + newLines.join("\n") + "\n", "utf8");
         break;
@@ -331,6 +366,8 @@ export class CarrierRepository {
 
       case "ordered-accumulate": {
         // Prepend new content after the first heading (newest-first log)
+        const key = decisionEntryKey(incoming);
+        if (key && normalizeMergeText(existing).includes(key)) break;
         const headerEnd = existing.indexOf("\n") + 1;
         const header = existing.slice(0, headerEnd);
         const body = existing.slice(headerEnd);
@@ -341,10 +378,11 @@ export class CarrierRepository {
 
       case "conflict-preserve": {
         // Append with a conflict marker if content seems different from existing
-        const alreadyPresent = existing.includes(incoming.trim().slice(0, 40));
-        if (!alreadyPresent) {
+        const normalized = incoming.trim();
+        const alreadyPresent = existing.includes(normalized.slice(0, 40));
+        if (!alreadyPresent && isUsefulAppendLine(normalized)) {
           const ts = new Date().toISOString().slice(0, 10);
-          const line = `- [ ] ${incoming.trim()} (added: ${ts})\n`;
+          const line = `- [ ] ${normalized} (added: ${ts})\n`;
           await writeFile(filePath, existing.trimEnd() + "\n" + line, "utf8");
         }
         break;
