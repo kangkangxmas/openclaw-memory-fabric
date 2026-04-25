@@ -139,8 +139,10 @@ export class RecallOrchestrator {
 
         const populated = carrierResp.carriers.filter((c) => c.exists);
         if (populated.length > 0) {
+          // Budget per carrier scales with depth: L1 gets 2 files, L2 gets 4
+          const perCarrierBudget = recallPlan.depth === "l2" ? 1500 : 800;
           enrichment = populated
-            .map((c) => `### Carrier: ${c.filename}\n${c.content.slice(0, 600)}`)
+            .map((c) => `### Carrier: ${c.filename}\n${c.content.slice(0, perCarrierBudget)}`)
             .join("\n\n");
           sources.push("carrier:" + populated.map((c) => c.filename).join(","));
         }
