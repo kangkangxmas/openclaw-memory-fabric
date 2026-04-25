@@ -154,11 +154,13 @@ export class CommitOrchestrator {
 
   private buildSelfModel(ctx: CommitContext, d: DistillResponse): string {
     const ts = new Date().toISOString();
+    const rawGoal =
+      ctx.messages.filter((m) => m.role === "user").slice(-1)[0]?.content ?? "Not specified";
     const goal =
-      ctx.messages
-        .filter((m) => m.role === "user")
-        .slice(-1)[0]
-        ?.content.slice(0, 120) ?? "Not specified";
+      rawGoal
+        .replace(/<!-- memory-fabric:begin -->[\s\S]*?<!-- memory-fabric:end -->/g, "")
+        .trim()
+        .slice(0, 120) || "Not specified";
 
     return [
       `# Self Model`,

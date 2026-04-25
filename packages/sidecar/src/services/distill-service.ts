@@ -98,6 +98,11 @@ export class DistillService {
     const assistantMessages = input.messages
       .filter((m) => m.role === "assistant")
       .map((m) => m.content);
+    const cleanedMessages = assistantMessages
+      .map((text) =>
+        text.replace(/<!-- memory-fabric:begin -->[\s\S]*?<!-- memory-fabric:end -->/g, "").trim()
+      )
+      .filter((text) => text.length > 0);
 
     const facts: string[] = [];
     const decisions: string[] = [];
@@ -105,7 +110,7 @@ export class DistillService {
     const patterns: string[] = [];
     const unresolved: string[] = [];
 
-    for (const text of assistantMessages) {
+    for (const text of cleanedMessages) {
       for (const sentence of splitIntoSentences(text)) {
         const decision = extractFirst(sentence, DECISION_PATTERNS);
         if (decision) decisions.push(decision);

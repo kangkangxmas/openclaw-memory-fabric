@@ -34,7 +34,13 @@ export function createAgentEndHandler(
     const agentId = ctx.agentId ?? "unknown";
     const projectId = ctx.workspaceDir ? path.basename(ctx.workspaceDir) : undefined;
     const messages = normaliseMessages(event.messages ?? []);
-    const assistantTurns = messages.filter((m) => m.role === "assistant");
+    const cleanMessages = messages.map((m) => ({
+      ...m,
+      content: m.content
+        .replace(/<!-- memory-fabric:begin -->[\s\S]*?<!-- memory-fabric:end -->/g, "")
+        .trim()
+    }));
+    const assistantTurns = cleanMessages.filter((m) => m.role === "assistant");
     if (assistantTurns.length === 0) return;
 
     const start = Date.now();
@@ -42,7 +48,7 @@ export function createAgentEndHandler(
       await orchestrator.execute({
         agentId,
         projectId,
-        messages,
+        messages: cleanMessages,
         toolCalls: event.toolCalls
       });
       metrics.recordCommit(Date.now() - start);
