@@ -2,7 +2,7 @@ import Fastify, { type FastifyError } from "fastify";
 import { loadSidecarConfig } from "./config/index.js";
 import { OpenVikingService } from "./services/openviking-service.js";
 import { CarrierRepository } from "./services/carrier-service.js";
-import { DistillService } from "./services/distill-service.js";
+import { DistillService, type DistillLLMConfig } from "./services/distill-service.js";
 import { GraphifyService } from "./services/graphify-service.js";
 import { SharedService } from "./services/shared-service.js";
 import { registerHealthRoute } from "./routes/health.js";
@@ -20,7 +20,22 @@ export async function buildServer() {
   const cfg = loadSidecarConfig();
   const openviking = new OpenVikingService(cfg.openviking);
   const carriers = new CarrierRepository(cfg.carriers.root);
-  const distill = new DistillService();
+  // Optional LLM refinement for distill — configure via env vars
+  const llmCfg: DistillLLMConfig | undefined =
+    process.env.DISTILL_LLM_BASE_URL && process.env.DISTILL_LLM_MODEL
+      ? {
+          baseUrl: process.env.DISTILL_LLM_BASE_URL,
+          apiKey: process.env.DISTILL_LLM_API_KEY ?? "none",
+          model: process.env.DISTILL_LLM_MODEL,
+          maxTokens: process.env.DISTILL_LLM_MAX_TOKENS
+            ? Number(process.env.DISTILL_LLM_MAX_TOKENS)
+            : undefined,
+          timeoutMs: process.env.DISTILL_LLM_TIMEOUT_MS
+            ? Number(process.env.DISTILL_LLM_TIMEOUT_MS)
+            : undefined
+        }
+      : undefined;
+  const distill = new DistillService(llmCfg);
   const graphify = new GraphifyService(cfg.graphify.basePath);
   const shared = new SharedService(cfg.carriers.root);
 

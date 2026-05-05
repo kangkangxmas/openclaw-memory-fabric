@@ -82,12 +82,74 @@ function uid(): string {
   return `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/** Simple relevance: score by keyword overlap between query and entry content */
-function scoreEntry(entry: MemoryEntry, query: string): number {
-  if (!query) return 1;
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const content = entry.content.toLowerCase();
-  return words.filter((w) => content.includes(w)).length;
+// ---------------------------------------------------------------------------
+// TF-IDF scoring
+// ---------------------------------------------------------------------------
+
+/** Tokenize text into lowercase word tokens, removing punctuation */
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}]/gu, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+}
+
+/** Build term-frequency map for a token list */
+function computeTF(tokens: string[]): Map<string, number> {
+  const tf = new Map<string, number>();
+  for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+  // Normalise by document length
+  for (const [t, cnt] of tf) tf.set(t, cnt / tokens.length);
+  return tf;
+}
+
+/**
+ * Compute IDF for query terms given a corpus of documents.
+ * idf(t) = ln( (N + 1) / (df(t) + 1) ) + 1  (smooth variant)
+ */
+function computeIDF(
+  queryTerms: string[],
+  corpus: string[][]
+): Map<string, number> {
+  const N = corpus.length;
+  const idf = new Map<string, number>();
+  for (const term of queryTerms) {
+    const df = corpus.filter((tokens) => tokens.includes(term)).length;
+    idf.set(term, Math.log((N + 1) / (df + 1)) + 1);
+  }
+  return idf;
+}
+
+/**
+ * Score an entry against a query using TF-IDF.
+ * Falls back gracefully: returns 1 when query is empty (treat all equal).
+ */
+function scoreEntryTFIDF(
+  entry: MemoryEntry,
+  queryTerms: string[],
+  idf: Map<string, number>
+): number {
+  if (queryTerms.length === 0) return 1;
+  const docTokens = tokenize(entry.content);
+  const tf = computeTF(docTokens);
+  let score = 0;
+  for (const term of queryTerms) {
+    score += (tf.get(term) ?? 0) * (idf.get(term) ?? 1);
+  }
+  return score;
+}
+
+/** Build a corpus-aware TF-IDF scorer for a set of entries and query */
+function buildTFIDFScorer(
+  entries: MemoryEntry[],
+  query: string
+): (entry: MemoryEntry) => number {
+  if (!query.trim()) return () => 1;
+  const queryTerms = tokenize(query);
+  const corpus = entries.map((e) => tokenize(e.content));
+  const idf = computeIDF(queryTerms, corpus);
+  return (entry) => scoreEntryTFIDF(entry, queryTerms, idf);
 }
 
 function resolveScope(raw: string | undefined): MemoryScope {
@@ -142,9 +204,10 @@ export class OpenVikingService {
       }
     }
 
-    // Score and take top N
+    // Score and take top N using TF-IDF
+    const scorer = buildTFIDFScorer(allEntries, query);
     const scored = allEntries
-      .map((e) => ({ entry: e, score: scoreEntry(e, query) }))
+      .map((e) => ({ entry: e, score: scorer(e) }))
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
         return new Date(b.entry.createdAt).getTime() - new Date(a.entry.createdAt).getTime();
@@ -303,10 +366,14 @@ export class OpenVikingService {
     }
 
     const normalizedQuery = query.trim().toLowerCase();
+    // For inspect: keep substring filter for exact match UX, but also allow TF-IDF partial matches
     const filtered = normalizedQuery
       ? allEntries.filter((entry) => {
           const haystack = `${entry.type} ${entry.content} ${(entry.tags ?? []).join(" ")}`.toLowerCase();
-          return haystack.includes(normalizedQuery);
+          // Include if exact substring match OR any query token present
+          if (haystack.includes(normalizedQuery)) return true;
+          const queryTokens = tokenize(normalizedQuery);
+          return queryTokens.some((t) => haystack.includes(t));
         })
       : allEntries;
 

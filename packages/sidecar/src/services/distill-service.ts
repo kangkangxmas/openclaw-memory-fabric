@@ -1,17 +1,39 @@
 /**
- * DistillService — rule-based message distillation.
+ * DistillService — two-tier message distillation.
  *
- * Extracts structured memory items from a conversation turn without an LLM
- * call. Uses pattern matching on assistant messages to detect facts,
- * decisions, entities, patterns, and unresolved items.
+ * Tier 1 (default): rule-based heuristic extraction — fast, zero-cost,
+ *   zero-latency. Used when no LLM config is provided.
  *
- * This is intentionally a lightweight heuristic tier. A production upgrade
- * path is to replace `distill()` with an LLM call while keeping the same
- * output interface.
+ * Tier 2 (optional LLM refinement): after heuristic extraction, an LLM
+ *   call polishes and enriches the output. Activated by passing
+ *   `DistillLLMConfig` to the constructor and setting `llm: true` in
+ *   `DistillInput`. Falls back to heuristic output on any LLM error.
+ *
+ * The output interface is identical for both tiers, so callers are
+ * unaffected by which tier runs.
  */
+
+// ---------------------------------------------------------------------------
+// LLM Configuration
+// ---------------------------------------------------------------------------
+
+export interface DistillLLMConfig {
+  /** OpenAI-compatible endpoint, e.g. http://localhost:11434/v1 */
+  baseUrl: string;
+  /** API key (use "ollama" or "none" for local endpoints) */
+  apiKey: string;
+  /** Model name, e.g. "gpt-4o-mini" or "qwen2.5:14b" */
+  model: string;
+  /** Max tokens for the refinement response (default: 800) */
+  maxTokens?: number;
+  /** Request timeout in ms (default: 15_000) */
+  timeoutMs?: number;
+}
 
 export interface DistillInput {
   messages: Array<{ role: string; content: string }>;
+  /** Set to true to invoke the LLM refinement tier (requires DistillLLMConfig) */
+  llm?: boolean;
 }
 
 export interface DistillOutput {
@@ -21,6 +43,8 @@ export interface DistillOutput {
   patterns: string[];
   unresolved: string[];
   publishCandidates: string[];
+  /** true when LLM refinement was applied */
+  llmRefined?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,10 +224,127 @@ function splitIntoSentences(text: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// LLM Refinement
+// ---------------------------------------------------------------------------
+
+const LLM_SYSTEM_PROMPT = `You are a memory extraction assistant. You receive a pre-extracted set of memory items (facts, decisions, entities, patterns, unresolved) from a conversation. Your job is to:
+1. Remove noise, duplicates, and low-quality entries.
+2. Rewrite entries for clarity and conciseness (max 200 chars each).
+3. Add any high-signal items the heuristic tier may have missed.
+4. Return ONLY a valid JSON object matching this schema:
+{
+  "facts": ["..."],
+  "decisions": ["..."],
+  "entities": ["..."],
+  "patterns": ["..."],
+  "unresolved": ["..."]
+}
+Do not include any explanation or markdown fences — pure JSON only.`;
+
+interface LLMMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+interface LLMResponse {
+  choices: Array<{ message: { content: string } }>;
+}
+
+async function callLLM(
+  cfg: DistillLLMConfig,
+  heuristic: DistillOutput
+): Promise<Partial<DistillOutput> | null> {
+  const userContent = JSON.stringify(
+    {
+      facts: heuristic.facts,
+      decisions: heuristic.decisions,
+      entities: heuristic.entities,
+      patterns: heuristic.patterns,
+      unresolved: heuristic.unresolved
+    },
+    null,
+    2
+  );
+
+  const messages: LLMMessage[] = [
+    { role: "system", content: LLM_SYSTEM_PROMPT },
+    { role: "user", content: userContent }
+  ];
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    cfg.timeoutMs ?? 15_000
+  );
+
+  try {
+    const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.apiKey}`
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages,
+        max_tokens: cfg.maxTokens ?? 800,
+        temperature: 0.2
+      }),
+      signal: controller.signal
+    });
+
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as LLMResponse;
+    const raw = data?.choices?.[0]?.message?.content?.trim() ?? "";
+
+    // Strip optional markdown fences
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    const parsed = JSON.parse(cleaned) as Partial<DistillOutput>;
+    return parsed;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function mergeWithHeuristic(
+  heuristic: DistillOutput,
+  refined: Partial<DistillOutput>
+): DistillOutput {
+  const dedup = (arr: string[] | undefined): string[] => [...new Set(arr ?? [])];
+  return {
+    facts: dedup(refined.facts).slice(0, 10),
+    decisions: dedup(refined.decisions).slice(0, 10),
+    entities: dedup(refined.entities).slice(0, 20),
+    patterns: dedup(refined.patterns).slice(0, 5),
+    unresolved: dedup(refined.unresolved).slice(0, 5),
+    publishCandidates: [
+      ...dedup(refined.decisions ?? heuristic.decisions).slice(0, 2),
+      ...dedup(refined.unresolved ?? heuristic.unresolved).slice(0, 2)
+    ],
+    llmRefined: true
+  };
+}
+
+// ---------------------------------------------------------------------------
 // DistillService
 // ---------------------------------------------------------------------------
 
 export class DistillService {
+  constructor(private readonly llmCfg?: DistillLLMConfig) {}
+
+  async distillAsync(input: DistillInput): Promise<DistillOutput> {
+    const heuristic = this.distill(input);
+    if (!input.llm || !this.llmCfg) return heuristic;
+
+    const refined = await callLLM(this.llmCfg, heuristic);
+    if (!refined) return heuristic; // graceful fallback
+
+    return mergeWithHeuristic(heuristic, refined);
+  }
+
   distill(input: DistillInput): DistillOutput {
     const assistantMessages = input.messages
       .filter((m) => m.role === "assistant")

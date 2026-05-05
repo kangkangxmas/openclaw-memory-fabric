@@ -19,6 +19,12 @@ interface StructuralBriefBody {
   projectId: string;
 }
 
+interface MaybeRefreshBody {
+  projectId: string;
+  paths: string[];
+  autoRefresh: "manual" | "on-demand" | "scheduled";
+}
+
 export function registerGraphRoutes(app: FastifyInstance, graphify: GraphifyService): void {
   // GET structural brief (lightweight — no heavy computation)
   app.post<{ Body: StructuralBriefBody }>(
@@ -101,6 +107,29 @@ export function registerGraphRoutes(app: FastifyInstance, graphify: GraphifyServ
     async (request) => {
       const { projectId, query } = request.body;
       return graphify.explainGraph(projectId, query);
+    }
+  );
+
+  // On-demand graph refresh (fire-and-forget background rebuild if stale)
+  app.post<{ Body: MaybeRefreshBody }>(
+    "/graph/maybe-refresh",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["projectId", "paths", "autoRefresh"],
+          properties: {
+            projectId: { type: "string", minLength: 1 },
+            paths: { type: "array", items: { type: "string" }, minItems: 1 },
+            autoRefresh: { type: "string", enum: ["manual", "on-demand", "scheduled"] }
+          }
+        }
+      }
+    },
+    async (request) => {
+      const { projectId, paths, autoRefresh } = request.body;
+      const result = await graphify.maybeRefresh(projectId, paths, autoRefresh);
+      return { ok: true, ...result };
     }
   );
 }

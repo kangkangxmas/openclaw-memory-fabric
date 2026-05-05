@@ -95,7 +95,7 @@ export function createPlugin(userConfig?: Partial<MemoryFabricConfig>) {
     },
     hooks: {
       before_prompt_build: createBeforePromptBuildHandler(client, config, logger, metrics),
-      agent_end: createAgentEndHandler(client, logger, metrics),
+      agent_end: createAgentEndHandler(client, config, logger, metrics),
       before_tool_call: createBeforeToolCallHandler(logger),
       after_tool_call: createAfterToolCallHandler(logger)
     }

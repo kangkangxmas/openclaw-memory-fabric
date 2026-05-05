@@ -3,6 +3,7 @@ import type { AgentEndEvent, HookAgentContext, HookMessage } from "./types.js";
 import type { SidecarClient } from "../utils/sidecar-client.js";
 import type { Logger } from "../utils/logger.js";
 import type { MetricsCollector } from "../utils/metrics.js";
+import type { MemoryFabricConfig } from "../types/index.js";
 import { CommitOrchestrator } from "../orchestrator/commit-orchestrator.js";
 
 /**
@@ -25,6 +26,7 @@ function normaliseMessages(raw: HookMessage[]): HookMessage[] {
 
 export function createAgentEndHandler(
   client: SidecarClient,
+  config: MemoryFabricConfig,
   logger: Logger,
   metrics: MetricsCollector
 ) {
@@ -57,6 +59,19 @@ export function createAgentEndHandler(
         hook: "agent_end",
         latencyMs: Date.now() - start
       });
+
+      // --- Graphify on-demand refresh (fire-and-forget) ---
+      if (ctx.workspaceDir && projectId && config.graphify.autoRefresh === "on-demand") {
+        client
+          .graphMaybeRefresh({
+            projectId,
+            paths: [ctx.workspaceDir],
+            autoRefresh: config.graphify.autoRefresh
+          })
+          .catch(() => {
+            /* non-fatal — don't break agent-end */
+          });
+      }
     } catch (err) {
       metrics.recordCommit(Date.now() - start, true);
       const msg = err instanceof Error ? err.message : String(err);

@@ -165,6 +165,8 @@ function extractEntities(filePath: string, content: string): string[] {
 // ---------------------------------------------------------------------------
 
 export class GraphifyService {
+  private refreshInProgress = new Set<string>();
+
   constructor(private readonly basePath: string) {}
 
   private graphDir(projectId: string): string {
@@ -479,6 +481,57 @@ export class GraphifyService {
       topNodes: graph.nodes.slice(0, 24),
       topEdges: graph.edges.slice(0, 24)
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // On-demand refresh
+  // -------------------------------------------------------------------------
+
+  /**
+   * If autoRefresh is "on-demand" and the graph is stale (>24h),
+   * trigger a background rebuild. Non-blocking, fire-and-forget.
+   */
+  async maybeRefresh(
+    projectId: string,
+    paths: string[],
+    autoRefresh: "manual" | "on-demand" | "scheduled"
+  ): Promise<{ triggered: boolean; reason?: string }> {
+    if (autoRefresh !== "on-demand") {
+      return { triggered: false, reason: "autoRefresh is not on-demand" };
+    }
+
+    if (this.refreshInProgress.has(projectId)) {
+      return { triggered: false, reason: "refresh already in progress" };
+    }
+
+    const graphPath = this.graphJsonPath(projectId);
+    if (!existsSync(graphPath)) {
+      return { triggered: false, reason: "no existing graph" };
+    }
+
+    try {
+      const raw = await readFile(graphPath, "utf8");
+      const graph = JSON.parse(raw) as ProjectGraph;
+      const ageMs = Date.now() - new Date(graph.generatedAt).getTime();
+
+      if (ageMs < 24 * 3600 * 1000) {
+        return { triggered: false, reason: "graph is fresh" };
+      }
+
+      // Stale → trigger background rebuild
+      this.refreshInProgress.add(projectId);
+      this.bootstrapProjectGraph({ projectId, paths })
+        .then(() => {
+          this.refreshInProgress.delete(projectId);
+        })
+        .catch(() => {
+          this.refreshInProgress.delete(projectId);
+        });
+
+      return { triggered: true, reason: `graph age ${Math.round(ageMs / 3600000)}h exceeds 24h` };
+    } catch {
+      return { triggered: false, reason: "failed to read graph" };
+    }
   }
 
   // -------------------------------------------------------------------------

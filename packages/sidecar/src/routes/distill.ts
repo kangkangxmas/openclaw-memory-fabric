@@ -5,6 +5,8 @@ interface DistillBody {
   agentId: string;
   projectId?: string;
   messages: Array<{ role: string; content: string }>;
+  /** Set to true to invoke the optional LLM refinement tier */
+  llm?: boolean;
 }
 
 export function registerDistillRoute(app: FastifyInstance, distill: DistillService): void {
@@ -18,6 +20,7 @@ export function registerDistillRoute(app: FastifyInstance, distill: DistillServi
           properties: {
             agentId: { type: "string", minLength: 1 },
             projectId: { type: "string" },
+            llm: { type: "boolean" },
             messages: {
               type: "array",
               items: {
@@ -34,7 +37,10 @@ export function registerDistillRoute(app: FastifyInstance, distill: DistillServi
       }
     },
     async (request) => {
-      return distill.distill({ messages: request.body.messages });
+      return distill.distillAsync({
+        messages: request.body.messages,
+        llm: request.body.llm ?? false
+      });
     }
   );
 }

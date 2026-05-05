@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { createBeforeToolCallHandler } from "../src/hooks/before-tool-call.js";
 import { createAfterToolCallHandler } from "../src/hooks/after-tool-call.js";
 import type { Logger } from "../src/utils/logger.js";
+import type { HookAgentContext } from "../src/hooks/types.js";
 
 // ---------------------------------------------------------------------------
 // Minimal logger stub that captures log calls
@@ -24,6 +25,11 @@ function makeLogger(): { calls: Array<{ level: string; msg: string }>; logger: L
   return { calls, logger };
 }
 
+const stubCtx: HookAgentContext = {
+  agentId: "agent-a",
+  workspaceDir: "/tmp/test-workspace"
+} as HookAgentContext;
+
 // ---------------------------------------------------------------------------
 // before_tool_call
 // ---------------------------------------------------------------------------
@@ -32,7 +38,7 @@ describe("before_tool_call hook", () => {
   it("logs at debug level for a high-value tool (write_file)", () => {
     const { calls, logger } = makeLogger();
     const handler = createBeforeToolCallHandler(logger);
-    handler({ agentId: "agent-a", toolName: "write_file", toolInput: { path: "/x" } });
+    handler({ toolName: "write_file", params: { path: "/x" } }, stubCtx);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].level, "debug");
   });
@@ -40,29 +46,29 @@ describe("before_tool_call hook", () => {
   it("does not log for a low-value tool (list_directory)", () => {
     const { calls, logger } = makeLogger();
     const handler = createBeforeToolCallHandler(logger);
-    handler({ agentId: "agent-a", toolName: "list_directory" });
+    handler({ toolName: "list_directory", params: {} }, stubCtx);
     assert.equal(calls.length, 0);
   });
 
   it("logs for tools containing 'commit' in the name", () => {
     const { calls, logger } = makeLogger();
     const handler = createBeforeToolCallHandler(logger);
-    handler({ agentId: "agent-a", toolName: "git_commit" });
+    handler({ toolName: "git_commit", params: {} }, stubCtx);
     assert.equal(calls.length, 1);
   });
 
   it("logs for tools containing 'delete' in the name", () => {
     const { calls, logger } = makeLogger();
     const handler = createBeforeToolCallHandler(logger);
-    handler({ agentId: "agent-a", toolName: "delete_files" });
+    handler({ toolName: "delete_files", params: {} }, stubCtx);
     assert.equal(calls.length, 1);
   });
 
-  it("does not throw if toolInput is undefined", () => {
+  it("does not throw if params is empty", () => {
     const { logger } = makeLogger();
     const handler = createBeforeToolCallHandler(logger);
     assert.doesNotThrow(() =>
-      handler({ agentId: "agent-a", toolName: "write_file", toolInput: undefined })
+      handler({ toolName: "write_file", params: {} }, stubCtx)
     );
   });
 });
@@ -75,7 +81,7 @@ describe("after_tool_call hook", () => {
   it("logs at debug level for every tool call", () => {
     const { calls, logger } = makeLogger();
     const handler = createAfterToolCallHandler(logger);
-    handler({ agentId: "agent-a", toolName: "read_file", toolResult: "content" });
+    handler({ toolName: "read_file", params: {}, result: "content" }, stubCtx);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].level, "debug");
   });
@@ -84,29 +90,28 @@ describe("after_tool_call hook", () => {
     const { calls, logger } = makeLogger();
     const handler = createAfterToolCallHandler(logger);
     const longResult = "x".repeat(500);
-    handler({ agentId: "agent-a", toolName: "read_file", toolResult: longResult });
-    // Should not throw and should log something
+    handler({ toolName: "read_file", params: {}, result: longResult }, stubCtx);
     assert.equal(calls.length, 1);
   });
 
   it("logs (empty) for null result", () => {
     const { calls, logger } = makeLogger();
     const handler = createAfterToolCallHandler(logger);
-    handler({ agentId: "agent-a", toolName: "some_tool", toolResult: null });
+    handler({ toolName: "some_tool", params: {}, result: null }, stubCtx);
     assert.equal(calls.length, 1);
   });
 
   it("summarises object results as key list", () => {
     const { calls, logger } = makeLogger();
     const handler = createAfterToolCallHandler(logger);
-    handler({ agentId: "agent-a", toolName: "read_file", toolResult: { a: 1, b: 2 } });
+    handler({ toolName: "read_file", params: {}, result: { a: 1, b: 2 } }, stubCtx);
     assert.equal(calls.length, 1);
   });
 
   it("includes durationMs if provided", () => {
     const { calls, logger } = makeLogger();
     const handler = createAfterToolCallHandler(logger);
-    handler({ agentId: "agent-a", toolName: "t", durationMs: 42 });
+    handler({ toolName: "t", params: {}, durationMs: 42 }, stubCtx);
     assert.equal(calls.length, 1);
   });
 });

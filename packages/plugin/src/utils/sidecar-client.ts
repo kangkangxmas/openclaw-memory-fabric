@@ -271,4 +271,12 @@ export class SidecarClient {
   async sharedForget(req: SharedForgetRequest): Promise<SharedForgetResponse> {
     return this.request<SharedForgetResponse>("POST", "/shared/forget", req);
   }
+
+  async graphMaybeRefresh(opts: {
+    projectId: string;
+    paths: string[];
+    autoRefresh: string;
+  }): Promise<{ triggered: boolean; reason?: string }> {
+    return this.request<{ triggered: boolean; reason?: string }>("POST", "/graph/maybe-refresh", opts);
+  }
 }

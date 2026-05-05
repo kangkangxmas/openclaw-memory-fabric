@@ -4,6 +4,15 @@ import { join } from "path";
 import { validateId } from "../utils/path-guard.js";
 
 // ---------------------------------------------------------------------------
+// execution-journal rotation constants
+// ---------------------------------------------------------------------------
+
+/** When execution-journal.md exceeds this many lines, rotate */
+const JOURNAL_ROTATE_THRESHOLD = 500;
+/** How many recent lines to retain after rotation */
+const JOURNAL_RETAIN_LINES = 200;
+
+// ---------------------------------------------------------------------------
 // Carrier file definitions
 // ---------------------------------------------------------------------------
 
@@ -20,6 +29,38 @@ interface CarrierDef {
   strategy: MergeStrategy;
   description: string;
   template: string;
+}
+
+// ---------------------------------------------------------------------------
+// Journal rotation
+// ---------------------------------------------------------------------------
+
+/**
+ * Rotate execution-journal content when it exceeds JOURNAL_ROTATE_THRESHOLD.
+ * Archives old entries to a <!-- archived --> comment block and retains the
+ * most recent JOURNAL_RETAIN_LINES lines in the active section.
+ */
+function rotateJournal(content: string): string {
+  const lines = content.split("\n");
+  if (lines.length <= JOURNAL_ROTATE_THRESHOLD) return content;
+
+  // Separate header (everything before the first ## entry)
+  const firstEntryIdx = lines.findIndex((l) => l.trimStart().startsWith("## "));
+  const headerLines = firstEntryIdx > 0 ? lines.slice(0, firstEntryIdx) : [];
+  const bodyLines = firstEntryIdx >= 0 ? lines.slice(firstEntryIdx) : lines;
+
+  // Keep the most recent JOURNAL_RETAIN_LINES lines; archive the rest
+  const keepLines = bodyLines.slice(-JOURNAL_RETAIN_LINES);
+  const archiveLines = bodyLines.slice(0, bodyLines.length - JOURNAL_RETAIN_LINES);
+
+  const archiveBlock = [
+    `<!-- archived: ${new Date().toISOString()} | ${archiveLines.length} lines removed -->`,
+    `<!-- archive-start`,
+    ...archiveLines,
+    `archive-end -->`
+  ];
+
+  return [...headerLines, ...archiveBlock, ...keepLines].join("\n");
 }
 
 function normalizeMergeText(value: string): string {
@@ -343,7 +384,14 @@ export class CarrierRepository {
       case "append": {
         // Unconditionally append new content with a separator
         const separator = `\n<!-- appended: ${new Date().toISOString()} -->\n`;
-        await writeFile(filePath, existing + separator + incoming, "utf8");
+        let appended = existing + separator + incoming;
+
+        // Rotate execution-journal when it grows beyond threshold
+        if (def.filename === "execution-journal.md") {
+          appended = rotateJournal(appended);
+        }
+
+        await writeFile(filePath, appended, "utf8");
         break;
       }
 
