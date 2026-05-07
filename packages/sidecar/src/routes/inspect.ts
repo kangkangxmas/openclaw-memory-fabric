@@ -272,15 +272,15 @@ const INSPECT_PAGE = String.raw`<!doctype html>
     <div class="shell">
       <div class="hero">
         <div class="eyebrow">OpenClaw Memory Fabric</div>
-        <h1>Inspector</h1>
+        <h1>记忆检索</h1>
         <div class="subhead">
-          主动查看某个 Agent 当前可召回的记忆、稳定 Carrier、原始 OpenViking 条目，以及项目知识图谱的结构摘要、节点和关系。
+          查看 Agent 的记忆摘要、载体文件、原始条目，以及项目知识图谱的结构、节点和关系。同时展示 P0-P2 自学习数据：经验记录、模式识别、技能草稿和自评分。
         </div>
       </div>
 
       <div class="layout">
         <aside class="panel controls">
-          <h2>Query Controls</h2>
+          <h2>查询条件</h2>
           <div class="field">
             <label for="agentId">Agent ID</label>
             <input id="agentId" value="boss" />
@@ -290,7 +290,7 @@ const INSPECT_PAGE = String.raw`<!doctype html>
             <input id="projectId" value="Boss" />
           </div>
           <div class="field">
-            <label for="scope">Scope</label>
+            <label for="scope">范围</label>
             <select id="scope">
               <option value="project" selected>project</option>
               <option value="private">private</option>
@@ -299,7 +299,7 @@ const INSPECT_PAGE = String.raw`<!doctype html>
             </select>
           </div>
           <div class="field">
-            <label for="depth">Recall Depth</label>
+            <label for="depth">召回深度</label>
             <select id="depth">
               <option value="l0">l0</option>
               <option value="l1">l1</option>
@@ -307,122 +307,122 @@ const INSPECT_PAGE = String.raw`<!doctype html>
             </select>
           </div>
           <div class="field">
-            <label for="query">Query</label>
+            <label for="query">查询内容</label>
             <textarea id="query">最近的重要记忆、决策和图谱结构</textarea>
           </div>
           <div class="field">
-            <label for="carrierFiles">Carrier Files</label>
+            <label for="carrierFiles">载体文件</label>
             <input id="carrierFiles" value="self-model.md,decision-log.md,entities-glossary.md,project-model.md" />
           </div>
           <div class="field">
-            <label for="memoryLimit">Raw Memory Limit</label>
+            <label for="memoryLimit">原始记忆条数上限</label>
             <input id="memoryLimit" type="number" min="1" max="500" value="80" />
           </div>
           <div class="button-grid">
-            <button id="loadAll">Load Full Snapshot</button>
-            <button id="loadBrief" class="secondary">Load Recall Brief</button>
-            <button id="loadCarriers" class="secondary">Load Carriers</button>
-            <button id="loadMemories" class="secondary">Load Raw Memories</button>
-            <button id="loadGraph" class="secondary">Load Graph Snapshot</button>
+            <button id="loadAll">加载完整快照</button>
+            <button id="loadBrief" class="secondary">加载记忆摘要</button>
+            <button id="loadCarriers" class="secondary">加载载体文件</button>
+            <button id="loadMemories" class="secondary">加载原始记忆</button>
+            <button id="loadGraph" class="secondary">加载图谱快照</button>
           </div>
 
           <div class="stack" style="margin-top: 18px;">
             <h2>Self-Learning (P0-P2)</h2>
             <div class="button-grid">
-              <button id="loadExperiences" class="secondary">Load Experiences</button>
-              <button id="loadPatterns" class="secondary">Load Patterns</button>
-              <button id="loadDrafts" class="secondary">Load Skill Drafts</button>
-              <button id="loadReport" class="secondary">Load Score Report</button>
+              <button id="loadExperiences" class="secondary">加载经验记录</button>
+              <button id="loadPatterns" class="secondary">加载识别模式</button>
+              <button id="loadDrafts" class="secondary">加载技能草稿</button>
+              <button id="loadReport" class="secondary">加载评分报告</button>
             </div>
           </div>
 
           <div class="stack" style="margin-top: 18px;">
-            <h2>Graph Probes</h2>
+            <h2>图谱探查</h2>
             <div class="field">
-              <label for="graphNeedle">Graph Query</label>
+              <label for="graphNeedle">图谱查询</label>
               <input id="graphNeedle" value="memory" />
             </div>
             <div class="button-grid">
-              <button id="runGraphQuery" class="secondary">Query Nodes</button>
+              <button id="runGraphQuery" class="secondary">查询节点</button>
             </div>
             <div class="field">
-              <label for="fromNode">Path From</label>
+              <label for="fromNode">路径起点</label>
               <input id="fromNode" value="Memory" />
             </div>
             <div class="field">
-              <label for="toNode">Path To</label>
+              <label for="toNode">路径终点</label>
               <input id="toNode" value="Boss" />
             </div>
             <div class="button-grid">
-              <button id="runGraphPath" class="secondary">Find Path</button>
-              <button id="runGraphExplain" class="secondary">Explain Node</button>
+              <button id="runGraphPath" class="secondary">查找路径</button>
+              <button id="runGraphExplain" class="secondary">解释节点</button>
             </div>
           </div>
         </aside>
 
         <main class="panel results">
           <div class="status">
-            <span class="pill" id="statusPill">Ready</span>
+            <span class="pill" id="statusPill">就绪</span>
             <span id="statusText">等待查询。</span>
           </div>
 
           <div class="metric-row">
-            <div class="metric"><div class="k">Memories</div><div class="v" id="memoryCount">0</div></div>
-            <div class="metric"><div class="k">Scopes Read</div><div class="v" id="scopeCount">0</div></div>
-            <div class="metric"><div class="k">Graph Nodes</div><div class="v" id="nodeCount">0</div></div>
-            <div class="metric"><div class="k">Graph Edges</div><div class="v" id="edgeCount">0</div></div>
+            <div class="metric"><div class="k">记忆数</div><div class="v" id="memoryCount">0</div></div>
+            <div class="metric"><div class="k">读取范围</div><div class="v" id="scopeCount">0</div></div>
+            <div class="metric"><div class="k">图谱节点</div><div class="v" id="nodeCount">0</div></div>
+            <div class="metric"><div class="k">图谱边</div><div class="v" id="edgeCount">0</div></div>
           </div>
 
           <div class="cards">
             <section class="card">
-              <h3>Recall Brief</h3>
+              <h3>记忆摘要</h3>
               <div class="card-body"><pre id="briefOut">尚未加载。</pre></div>
             </section>
             <section class="card">
-              <h3>Graph Report</h3>
+              <h3>图谱报告</h3>
               <div class="card-body"><pre id="graphReportOut">尚未加载。</pre></div>
             </section>
           </div>
 
           <section class="card">
-            <h3>Carrier Files</h3>
+            <h3>载体文件</h3>
             <div class="card-body" id="carrierOut">尚未加载。</div>
           </section>
 
           <section class="card">
-            <h3>Raw Memory Entries</h3>
+            <h3>原始记忆条目</h3>
             <div class="card-body" id="memoryTableWrap">尚未加载。</div>
           </section>
 
           <div class="cards">
             <section class="card">
-              <h3>Graph Query / Path</h3>
+              <h3>图谱查询 / 路径</h3>
               <div class="card-body"><pre id="graphProbeOut">尚未执行。</pre></div>
             </section>
             <section class="card">
-              <h3>Top Graph Nodes / Edges</h3>
+              <h3>热门节点 / 边</h3>
               <div class="card-body"><pre id="graphSummaryOut">尚未加载。</pre></div>
             </section>
           </div>
 
           <div class="cards">
             <section class="card">
-              <h3>Experiences (经验记录)</h3>
+              <h3>经验记录</h3>
               <div class="card-body"><pre id="experiencesOut">尚未加载。</pre></div>
             </section>
             <section class="card">
-              <h3>Patterns (识别模式)</h3>
+              <h3>识别模式</h3>
               <div class="card-body"><pre id="patternsOut">尚未加载。</pre></div>
             </section>
           </div>
 
           <div class="cards">
             <section class="card">
-              <h3>Skill Drafts (待审阅)</h3>
+              <h3>技能草稿</h3>
               <div class="card-body"><pre id="draftsOut">尚未加载。</pre></div>
             </section>
             <section class="card">
-              <h3>Score Report (自评分)</h3>
+              <h3>评分报告</h3>
               <div class="card-body"><pre id="reportOut">尚未加载。</pre></div>
             </section>
           </div>
@@ -452,7 +452,7 @@ const INSPECT_PAGE = String.raw`<!doctype html>
       }
 
       function setStatus(text, accent = "var(--accent)") {
-        $("statusPill").textContent = "Live";
+        $("statusPill").textContent = "运行中";
         $("statusPill").style.background = "rgba(15, 118, 110, 0.1)";
         $("statusPill").style.color = accent;
         $("statusText").textContent = text;
@@ -466,14 +466,14 @@ const INSPECT_PAGE = String.raw`<!doctype html>
         });
         const data = await res.json();
         if (!res.ok) {
-          throw new Error(data?.error?.message || "Request failed");
+          throw new Error(data?.error?.message || "请求失败");
         }
         return data;
       }
 
       function renderCarrier(carriers) {
         if (!carriers.length) {
-          $("carrierOut").textContent = "没有可显示的 Carrier。";
+          $("carrierOut").textContent = "没有可显示的载体文件。";
           return;
         }
         $("carrierOut").innerHTML = carriers.map((carrier) => {
@@ -497,7 +497,7 @@ const INSPECT_PAGE = String.raw`<!doctype html>
           '<td>' + escapeHtml(entry.content || "") + '</td>' +
         '</tr>').join("");
         $("memoryTableWrap").innerHTML =
-          '<table><thead><tr><th>Created</th><th>Type</th><th>Scope</th><th>Content</th></tr></thead><tbody>' +
+          '<table><thead><tr><th>创建时间</th><th>类型</th><th>范围</th><th>内容</th></tr></thead><tbody>' +
           rows +
           '</tbody></table>';
       }
@@ -512,8 +512,8 @@ const INSPECT_PAGE = String.raw`<!doctype html>
       async function loadBrief() {
         const c = ctx();
         const data = await post("/recall", c);
-        $("briefOut").textContent = data.memoryBrief || "No brief";
-        setStatus("Recall brief loaded.");
+        $("briefOut").textContent = data.memoryBrief || "无摘要";
+        setStatus("记忆摘要已加载。");
       }
 
       async function loadCarriers() {
@@ -524,7 +524,7 @@ const INSPECT_PAGE = String.raw`<!doctype html>
           files: c.files
         });
         renderCarrier(data.carriers || []);
-        setStatus("Carrier files loaded.");
+        setStatus("载体文件已加载。");
       }
 
       async function loadMemories() {
@@ -539,16 +539,16 @@ const INSPECT_PAGE = String.raw`<!doctype html>
         $("memoryCount").textContent = String(data.totalEntries || 0);
         $("scopeCount").textContent = String((data.scopesRead || []).length);
         renderMemories(data.entries || []);
-        setStatus("Raw memories loaded.");
+        setStatus("原始记忆已加载。");
       }
 
       async function loadGraph() {
         const c = ctx();
-        if (!c.projectId) throw new Error("Project ID is required for graph inspection.");
+        if (!c.projectId) throw new Error("图谱查询需要 Project ID。");
         const data = await post("/inspect/graph", { projectId: c.projectId });
         $("nodeCount").textContent = String(data.nodeCount || 0);
         $("edgeCount").textContent = String(data.edgeCount || 0);
-        $("graphReportOut").textContent = data.report || "No graph report";
+        $("graphReportOut").textContent = data.report || "无图谱报告";
         const topNodes = (data.topNodes || []).slice(0, 8).map((node) =>
           "- " + node.id + " (" + node.mentions + ", " + node.type + ")"
         );
@@ -556,9 +556,9 @@ const INSPECT_PAGE = String.raw`<!doctype html>
           "- " + edge.source + " ↔ " + edge.target + " (" + edge.weight + ")"
         );
         $("graphSummaryOut").textContent =
-          "Top Nodes\n" + (topNodes.join("\n") || "_none_") +
-          "\n\nTop Edges\n" + (topEdges.join("\n") || "_none_");
-        setStatus("Graph snapshot loaded.");
+          "热门节点\n" + (topNodes.join("\n") || "_无_") +
+          "\n\n热门边\n" + (topEdges.join("\n") || "_无_");
+        setStatus("图谱快照已加载。");
       }
 
       async function runGraphQuery() {
@@ -569,7 +569,7 @@ const INSPECT_PAGE = String.raw`<!doctype html>
           budget: 12
         });
         $("graphProbeOut").textContent = JSON.stringify(data, null, 2);
-        setStatus("Graph query executed.");
+        setStatus("图谱查询已执行。");
       }
 
       async function runGraphPath() {
@@ -580,7 +580,7 @@ const INSPECT_PAGE = String.raw`<!doctype html>
           to: $("toNode").value.trim()
         });
         $("graphProbeOut").textContent = JSON.stringify(data, null, 2);
-        setStatus("Graph path executed.");
+        setStatus("路径查找已执行。");
       }
 
       async function runGraphExplain() {
@@ -590,34 +590,34 @@ const INSPECT_PAGE = String.raw`<!doctype html>
           query: $("graphNeedle").value.trim()
         });
         $("graphProbeOut").textContent = JSON.stringify(data, null, 2);
-        setStatus("Graph explain executed.");
+        setStatus("节点解释已执行。");
       }
 
       async function loadExperiences() {
         const c = ctx();
         const data = await fetch(apiBase() + "/inspect/experiences?agentId=" + encodeURIComponent(c.agentId)).then((r) => r.json());
         $("experiencesOut").textContent = JSON.stringify(data, null, 2);
-        setStatus("Experiences loaded.");
+        setStatus("经验记录已加载。");
       }
 
       async function loadPatterns() {
         const c = ctx();
         const data = await fetch(apiBase() + "/patterns?agentId=" + encodeURIComponent(c.agentId)).then((r) => r.json());
         $("patternsOut").textContent = JSON.stringify(data, null, 2);
-        setStatus("Patterns loaded.");
+        setStatus("识别模式已加载。");
       }
 
       async function loadDrafts() {
         const data = await fetch(apiBase() + "/skills/drafts").then((r) => r.json());
         $("draftsOut").textContent = JSON.stringify(data, null, 2);
-        setStatus("Skill drafts loaded.");
+        setStatus("技能草稿已加载。");
       }
 
       async function loadReport() {
         const c = ctx();
         const data = await fetch(apiBase() + "/report?agentId=" + encodeURIComponent(c.agentId)).then((r) => r.json());
         $("reportOut").textContent = JSON.stringify(data, null, 2);
-        setStatus("Score report loaded.");
+        setStatus("评分报告已加载。");
       }
 
       async function withBusy(fn, label) {
@@ -627,7 +627,7 @@ const INSPECT_PAGE = String.raw`<!doctype html>
         try {
           await fn();
         } catch (error) {
-          $("statusPill").textContent = "Error";
+          $("statusPill").textContent = "错误";
           $("statusPill").style.background = "rgba(153, 27, 27, 0.1)";
           $("statusPill").style.color = "#991b1b";
           $("statusText").textContent = error.message || String(error);
@@ -636,13 +636,13 @@ const INSPECT_PAGE = String.raw`<!doctype html>
         }
       }
 
-      $("loadBrief").addEventListener("click", () => withBusy(loadBrief, "Loading brief"));
-      $("loadCarriers").addEventListener("click", () => withBusy(loadCarriers, "Loading carriers"));
-      $("loadMemories").addEventListener("click", () => withBusy(loadMemories, "Loading memories"));
-      $("loadGraph").addEventListener("click", () => withBusy(loadGraph, "Loading graph"));
-      $("runGraphQuery").addEventListener("click", () => withBusy(runGraphQuery, "Running graph query"));
-      $("runGraphPath").addEventListener("click", () => withBusy(runGraphPath, "Running graph path"));
-      $("runGraphExplain").addEventListener("click", () => withBusy(runGraphExplain, "Running graph explain"));
+      $("loadBrief").addEventListener("click", () => withBusy(loadBrief, "加载记忆摘要"));
+      $("loadCarriers").addEventListener("click", () => withBusy(loadCarriers, "加载载体文件"));
+      $("loadMemories").addEventListener("click", () => withBusy(loadMemories, "加载原始记忆"));
+      $("loadGraph").addEventListener("click", () => withBusy(loadGraph, "加载图谱快照"));
+      $("runGraphQuery").addEventListener("click", () => withBusy(runGraphQuery, "执行图谱查询"));
+      $("runGraphPath").addEventListener("click", () => withBusy(runGraphPath, "执行路径查找"));
+      $("runGraphExplain").addEventListener("click", () => withBusy(runGraphExplain, "执行节点解释"));
       $("loadAll").addEventListener("click", () => withBusy(async () => {
         await loadBrief();
         await loadCarriers();
@@ -652,12 +652,12 @@ const INSPECT_PAGE = String.raw`<!doctype html>
         await loadPatterns();
         await loadDrafts();
         await loadReport();
-      }, "Loading full snapshot"));
+      }, "加载完整快照"));
 
-      $("loadExperiences").addEventListener("click", () => withBusy(loadExperiences, "Loading experiences"));
-      $("loadPatterns").addEventListener("click", () => withBusy(loadPatterns, "Loading patterns"));
-      $("loadDrafts").addEventListener("click", () => withBusy(loadDrafts, "Loading drafts"));
-      $("loadReport").addEventListener("click", () => withBusy(loadReport, "Loading report"));
+      $("loadExperiences").addEventListener("click", () => withBusy(loadExperiences, "加载经验记录"));
+      $("loadPatterns").addEventListener("click", () => withBusy(loadPatterns, "加载识别模式"));
+      $("loadDrafts").addEventListener("click", () => withBusy(loadDrafts, "加载技能草稿"));
+      $("loadReport").addEventListener("click", () => withBusy(loadReport, "加载评分报告"));
     </script>
   </body>
 </html>`;
