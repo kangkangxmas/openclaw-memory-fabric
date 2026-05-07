@@ -126,7 +126,7 @@ export async function buildServer() {
   registerDistillRoute(app, distill);
   registerBootstrapRoute(app, graphify);
   registerGraphRoutes(app, graphify);
-  registerInspectRoutes(app, openviking, graphify);
+  registerInspectRoutes(app, openviking, graphify, expStore);
   registerSharedRoutes(app, shared);
   registerPatternsRoute(app, patService);
   registerSkillsRoute(app, skillGen);

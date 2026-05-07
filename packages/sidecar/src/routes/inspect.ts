@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { OpenVikingService } from "../services/openviking-service.js";
 import type { GraphifyService } from "../services/graphify-service.js";
+import type { ExperienceStore } from "../stores/experience-store.js";
 
 const INSPECT_PAGE = String.raw`<!doctype html>
 <html lang="zh-CN">
@@ -326,6 +327,16 @@ const INSPECT_PAGE = String.raw`<!doctype html>
           </div>
 
           <div class="stack" style="margin-top: 18px;">
+            <h2>Self-Learning (P0-P2)</h2>
+            <div class="button-grid">
+              <button id="loadExperiences" class="secondary">Load Experiences</button>
+              <button id="loadPatterns" class="secondary">Load Patterns</button>
+              <button id="loadDrafts" class="secondary">Load Skill Drafts</button>
+              <button id="loadReport" class="secondary">Load Score Report</button>
+            </div>
+          </div>
+
+          <div class="stack" style="margin-top: 18px;">
             <h2>Graph Probes</h2>
             <div class="field">
               <label for="graphNeedle">Graph Query</label>
@@ -391,6 +402,28 @@ const INSPECT_PAGE = String.raw`<!doctype html>
             <section class="card">
               <h3>Top Graph Nodes / Edges</h3>
               <div class="card-body"><pre id="graphSummaryOut">尚未加载。</pre></div>
+            </section>
+          </div>
+
+          <div class="cards">
+            <section class="card">
+              <h3>Experiences (经验记录)</h3>
+              <div class="card-body"><pre id="experiencesOut">尚未加载。</pre></div>
+            </section>
+            <section class="card">
+              <h3>Patterns (识别模式)</h3>
+              <div class="card-body"><pre id="patternsOut">尚未加载。</pre></div>
+            </section>
+          </div>
+
+          <div class="cards">
+            <section class="card">
+              <h3>Skill Drafts (待审阅)</h3>
+              <div class="card-body"><pre id="draftsOut">尚未加载。</pre></div>
+            </section>
+            <section class="card">
+              <h3>Score Report (自评分)</h3>
+              <div class="card-body"><pre id="reportOut">尚未加载。</pre></div>
             </section>
           </div>
         </main>
@@ -560,6 +593,33 @@ const INSPECT_PAGE = String.raw`<!doctype html>
         setStatus("Graph explain executed.");
       }
 
+      async function loadExperiences() {
+        const c = ctx();
+        const data = await fetch(apiBase() + "/inspect/experiences?agentId=" + encodeURIComponent(c.agentId)).then((r) => r.json());
+        $("experiencesOut").textContent = JSON.stringify(data, null, 2);
+        setStatus("Experiences loaded.");
+      }
+
+      async function loadPatterns() {
+        const c = ctx();
+        const data = await fetch(apiBase() + "/patterns?agentId=" + encodeURIComponent(c.agentId)).then((r) => r.json());
+        $("patternsOut").textContent = JSON.stringify(data, null, 2);
+        setStatus("Patterns loaded.");
+      }
+
+      async function loadDrafts() {
+        const data = await fetch(apiBase() + "/skills/drafts").then((r) => r.json());
+        $("draftsOut").textContent = JSON.stringify(data, null, 2);
+        setStatus("Skill drafts loaded.");
+      }
+
+      async function loadReport() {
+        const c = ctx();
+        const data = await fetch(apiBase() + "/report?agentId=" + encodeURIComponent(c.agentId)).then((r) => r.json());
+        $("reportOut").textContent = JSON.stringify(data, null, 2);
+        setStatus("Score report loaded.");
+      }
+
       async function withBusy(fn, label) {
         const buttons = [...document.querySelectorAll("button")];
         buttons.forEach((button) => button.disabled = true);
@@ -588,7 +648,16 @@ const INSPECT_PAGE = String.raw`<!doctype html>
         await loadCarriers();
         await loadMemories();
         await loadGraph();
+        await loadExperiences();
+        await loadPatterns();
+        await loadDrafts();
+        await loadReport();
       }, "Loading full snapshot"));
+
+      $("loadExperiences").addEventListener("click", () => withBusy(loadExperiences, "Loading experiences"));
+      $("loadPatterns").addEventListener("click", () => withBusy(loadPatterns, "Loading patterns"));
+      $("loadDrafts").addEventListener("click", () => withBusy(loadDrafts, "Loading drafts"));
+      $("loadReport").addEventListener("click", () => withBusy(loadReport, "Loading report"));
     </script>
   </body>
 </html>`;
@@ -596,7 +665,8 @@ const INSPECT_PAGE = String.raw`<!doctype html>
 export function registerInspectRoutes(
   app: FastifyInstance,
   openviking: OpenVikingService,
-  graphify: GraphifyService
+  graphify: GraphifyService,
+  expStore?: ExperienceStore
 ): void {
   app.get("/inspect", async (_request, reply) => {
     return reply.type("text/html; charset=utf-8").send(INSPECT_PAGE);
@@ -649,4 +719,26 @@ export function registerInspectRoutes(
       return graphify.inspectProjectGraph(request.body.projectId);
     }
   );
+
+  // P0-P2: Self-learning inspection endpoints
+  if (expStore) {
+    app.get<{ Querystring: { agentId: string } }>(
+      "/inspect/experiences",
+      {
+        schema: {
+          querystring: {
+            type: "object",
+            required: ["agentId"],
+            properties: {
+              agentId: { type: "string", minLength: 1 }
+            }
+          }
+        }
+      },
+      async (request) => {
+        const entries = await expStore.query({ agentId: request.query.agentId });
+        return { ok: true, count: entries.length, entries };
+      }
+    );
+  }
 }
