@@ -21,6 +21,12 @@ export interface CommitRequest {
   patterns?: string[];
   unresolved?: string[];
   visibility?: "private" | "project_shared" | "org_shared";
+  /** P0-1: Tool call names from this session (for experience distillation) */
+  toolCalls?: Array<{ name: string }>;
+  /** P0-1: Total assistant turn count (proxy for conversation depth) */
+  turnCount?: number;
+  /** P0-1: Pre-built session summary (plugin side) */
+  sessionSummary?: string;
 }
 
 export interface CommitResponse {

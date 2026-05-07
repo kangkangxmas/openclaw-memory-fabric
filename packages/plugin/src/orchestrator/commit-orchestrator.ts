@@ -74,6 +74,12 @@ export class CommitOrchestrator {
       entities: rawDistilled.entities.filter((entity) => isCleanEntity(entity))
     };
 
+    // Build session summary for experience distillation (P0-1)
+    const sessionSummary = buildSessionSummary(ctx);
+
+    const toolCallNames = (ctx.toolCalls ?? []).map((t) => ({ name: t.name }));
+    const turnCount = ctx.messages.filter((m) => m.role === "assistant").length;
+
     // Step 2: Commit to OpenViking
     const commitResp = await this.client.commit({
       agentId: ctx.agentId,
@@ -83,7 +89,11 @@ export class CommitOrchestrator {
       entities: distilled.entities,
       patterns: distilled.patterns,
       unresolved: distilled.unresolved,
-      visibility: "private"
+      visibility: "private",
+      // P0-1: pass session metadata for sidecar experience distillation
+      toolCalls: toolCallNames,
+      turnCount,
+      sessionSummary
     });
 
     // Step 3: Update carrier files
@@ -233,4 +243,26 @@ export class CommitOrchestrator {
       .join("\n")
       .trimEnd();
   }
+}
+
+// ---------------------------------------------------------------------------
+// P0-1: Build a concise session summary from messages for experience distillation
+// ---------------------------------------------------------------------------
+
+function buildSessionSummary(ctx: CommitContext): string {
+  const userMessages = ctx.messages.filter((m) => m.role === "user");
+  const lastUserMsg = userMessages
+    .slice(-1)[0]?.content
+    ?.replace(/<!-- memory-fabric:begin -->[\s\S]*?<!-- memory-fabric:end -->/g, "")
+    .trim()
+    .slice(0, 300) ?? "";
+
+  const assistantCount = ctx.messages.filter((m) => m.role === "assistant").length;
+  const toolNames = [...new Set((ctx.toolCalls ?? []).map((t) => t.name))].slice(0, 10);
+
+  const parts: string[] = [`Turns: ${assistantCount}`];
+  if (toolNames.length > 0) parts.push(`Tools: ${toolNames.join(", ")}`);
+  if (lastUserMsg) parts.push(`Goal: ${lastUserMsg}`);
+
+  return parts.join(" | ");
 }

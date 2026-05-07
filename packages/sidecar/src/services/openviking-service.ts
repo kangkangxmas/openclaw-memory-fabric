@@ -8,6 +8,7 @@ import {
 } from "../adapters/openviking-adapter.js";
 import type { SidecarConfig } from "../config/index.js";
 import { readJsonl, appendJsonl, ensureDir } from "../utils/jsonl.js";
+import type { VectorService } from "./vector-service.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -162,7 +163,10 @@ function resolveScope(raw: string | undefined): MemoryScope {
 // ---------------------------------------------------------------------------
 
 export class OpenVikingService {
-  constructor(private readonly cfg: SidecarConfig["openviking"]) {}
+  constructor(
+    private readonly cfg: SidecarConfig["openviking"],
+    private readonly vectorService?: VectorService
+  ) {}
 
   // -------------------------------------------------------------------------
   // recallMemory
@@ -204,16 +208,33 @@ export class OpenVikingService {
       }
     }
 
-    // Score and take top N using TF-IDF
+    // Score using TF-IDF
     const scorer = buildTFIDFScorer(allEntries, query);
-    const scored = allEntries
-      .map((e) => ({ entry: e, score: scorer(e) }))
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return new Date(b.entry.createdAt).getTime() - new Date(a.entry.createdAt).getTime();
-      })
-      .slice(0, maxEntries)
-      .map((s) => s.entry);
+    const tfidfMap = new Map<string, number>();
+    for (const e of allEntries) {
+      tfidfMap.set(e.id, scorer(e));
+    }
+
+    let scored: MemoryEntry[];
+
+    // P2-1: If vector service is available, use hybrid ranking
+    if (this.vectorService && query.trim()) {
+      const hybrid = await this.vectorService.hybridQuery(query, tfidfMap, maxEntries * 2);
+      const entryMap = new Map(allEntries.map((e) => [e.id, e]));
+      scored = hybrid
+        .map((h) => entryMap.get(h.entryId))
+        .filter((e): e is MemoryEntry => e !== undefined)
+        .slice(0, maxEntries);
+    } else {
+      scored = allEntries
+        .map((e) => ({ entry: e, score: tfidfMap.get(e.id) ?? 0 }))
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          return new Date(b.entry.createdAt).getTime() - new Date(a.entry.createdAt).getTime();
+        })
+        .slice(0, maxEntries)
+        .map((s) => s.entry);
+    }
 
     const brief = this.formatBrief(scored, { agentId, projectId, scope, depth });
     const budgetUsed = Math.min(brief.length, DEPTH_BUDGET[depth] ?? 600);
@@ -277,6 +298,11 @@ export class OpenVikingService {
         tags: []
       };
       await appendJsonl(memoriesPath, entry);
+
+      // P2-1: Async vector index (fire-and-forget)
+      if (this.vectorService) {
+        void this.vectorService.index(entry.id, agentId, entry.content);
+      }
     }
 
     // Update summary file (last-write-wins for now)
