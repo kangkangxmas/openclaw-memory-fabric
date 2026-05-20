@@ -74,6 +74,55 @@ export function registerInspectRoutes(
     return reply.send({ ok: true, agents });
   });
 
+  // Agent 关联的项目列表 — 扫描 carriers + openviking 的 projects 子目录
+  app.get<{ Querystring: { agentId: string } }>(
+    "/inspect/projects",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          required: ["agentId"],
+          properties: {
+            agentId: { type: "string", minLength: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { agentId } = request.query;
+      const projectSet = new Set<string>();
+
+      // Source 1: Carriers agents/{agentId}/projects/
+      try {
+        const carriersProjectsDir = join(
+          process.env.CARRIERS_ROOT ?? join(process.env.HOME ?? "/tmp", ".memory-fabric", "carriers"),
+          "agents", agentId, "projects",
+        );
+        if (existsSync(carriersProjectsDir)) {
+          for (const d of readdirSync(carriersProjectsDir, { withFileTypes: true })) {
+            if (d.isDirectory()) projectSet.add(d.name);
+          }
+        }
+      } catch { /* non-fatal */ }
+
+      // Source 2: OpenViking agents/{agentId}/projects/
+      try {
+        const ovProjectsDir = join(
+          process.env.OPENVIKING_BASE_PATH ?? join(process.env.HOME ?? "/tmp", ".openviking", "data", "viking", "openclaw-personal"),
+          "org", "default", "agents", agentId, "projects",
+        );
+        if (existsSync(ovProjectsDir)) {
+          for (const d of readdirSync(ovProjectsDir, { withFileTypes: true })) {
+            if (d.isDirectory()) projectSet.add(d.name);
+          }
+        }
+      } catch { /* non-fatal */ }
+
+      const projects = [...projectSet].sort();
+      return reply.send({ ok: true, projects });
+    },
+  );
+
   app.post<{
     Body: {
       agentId: string;

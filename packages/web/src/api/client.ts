@@ -44,6 +44,11 @@ export const api = {
   getAgents: () =>
     get<{ ok: boolean; agents: string[] }>("/inspect/agents"),
 
+  getProjects: (agentId: string) =>
+    get<{ ok: boolean; projects: string[] }>(
+      `/inspect/projects?agentId=${encodeURIComponent(agentId)}`,
+    ),
+
   postRecall: (req: RecallRequest) =>
     post<RecallResponse>("/recall", req),
 

@@ -17,26 +17,29 @@ export interface AppContext {
   scope: Scope;
   depth: Depth;
   agents: string[];
+  projects: string[];
 }
 
 export default function App() {
   const [page, setPage] = useState<Page>("overview");
   const [ctx, setCtx] = useState<AppContext>({
     agentId: "",
-    projectId: "Boss",
+    projectId: "",
     scope: "project",
     depth: "l0",
     agents: [],
+    projects: [],
   });
 
-  const loadAgents = useCallback(async () => {
+  // Load projects for a given agent
+  const loadProjects = useCallback(async (agentId: string) => {
     try {
-      const res = await api.getAgents();
-      if (res.ok && res.agents.length > 0) {
+      const res = await api.getProjects(agentId);
+      if (res.ok) {
         setCtx((prev) => ({
           ...prev,
-          agents: res.agents,
-          agentId: prev.agentId || res.agents[0],
+          projects: res.projects,
+          projectId: res.projects.length > 0 ? res.projects[0] : "",
         }));
       }
     } catch {
@@ -44,13 +47,35 @@ export default function App() {
     }
   }, []);
 
+  const loadAgents = useCallback(async () => {
+    try {
+      const res = await api.getAgents();
+      if (res.ok && res.agents.length > 0) {
+        const firstAgent = res.agents[0];
+        setCtx((prev) => ({
+          ...prev,
+          agents: res.agents,
+          agentId: prev.agentId || firstAgent,
+        }));
+        // Load projects for the initial agent
+        void loadProjects(firstAgent);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [loadProjects]);
+
   useEffect(() => {
     void loadAgents();
   }, [loadAgents]);
 
   const updateCtx = useCallback((patch: Partial<AppContext>) => {
     setCtx((prev) => ({ ...prev, ...patch }));
-  }, []);
+    // When agent changes, reload projects
+    if (patch.agentId) {
+      void loadProjects(patch.agentId);
+    }
+  }, [loadProjects]);
 
   return (
     <div className="min-h-screen bg-bg">

@@ -75,12 +75,20 @@ export function Sidebar({ ctx, onUpdate, currentPage, onNavigate }: SidebarProps
 
         <label className="block">
           <span className="text-xs text-muted">项目标识</span>
-          <input
-            type="text"
+          <select
             value={ctx.projectId}
             onChange={(e) => onUpdate({ projectId: e.target.value })}
             className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
-          />
+          >
+            {ctx.projects.length === 0 && (
+              <option value="">（无项目）</option>
+            )}
+            {ctx.projects.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="block">
