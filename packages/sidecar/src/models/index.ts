@@ -4,12 +4,14 @@ export interface RecallRequest {
   scope?: "private" | "project" | "shared" | "auto";
   depth?: "l0" | "l1" | "l2";
   query?: string;
+  taskType?: string;
 }
 
 export interface RecallResponse {
   memoryBrief: string;
   sources: string[];
   budgetUsed: number;
+  taskType?: string;
 }
 
 export interface CommitRequest {

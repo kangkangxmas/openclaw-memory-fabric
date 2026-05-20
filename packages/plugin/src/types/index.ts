@@ -100,6 +100,16 @@ export interface SelfModel {
   updatedAt: string;
 }
 
+export type TaskType =
+  | "code_review"
+  | "debug"
+  | "architecture"
+  | "devops"
+  | "qa"
+  | "documentation"
+  | "refactor"
+  | "general";
+
 export interface StructuralBrief {
   projectId: string;
   freshness: "fresh" | "stale" | "missing";

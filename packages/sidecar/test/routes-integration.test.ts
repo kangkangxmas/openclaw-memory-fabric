@@ -165,6 +165,28 @@ describe("POST /recall", () => {
     assert.ok(body.error.code === "BAD_REQUEST");
   });
 
+  it("accepts taskType field and returns it in response", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/recall",
+      payload: { agentId: "agent-r2", depth: "l0", taskType: "debug" }
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body) as { taskType?: string };
+    assert.equal(body.taskType, "debug");
+  });
+
+  it("works without taskType (backward compatibility)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/recall",
+      payload: { agentId: "agent-r3", depth: "l0" }
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body) as { memoryBrief: string; taskType?: string };
+    assert.ok(typeof body.memoryBrief === "string");
+  });
+
   it("commit then recall returns the committed content", async () => {
     // Commit with projectId so scope resolves to project correctly
     await app.inject({

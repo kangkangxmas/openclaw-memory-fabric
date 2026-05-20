@@ -77,7 +77,7 @@ export function createBeforePromptBuildHandler(
     const { brief, sources, plan } = result;
     const header = [
       "<!-- memory-fabric:begin -->",
-      `<!-- depth=${plan.depth} scope=${plan.scope} sources=${sources.join("|")} -->`,
+      `<!-- depth=${plan.depth} scope=${plan.scope} taskType=${plan.taskType} sources=${sources.join("|")} -->`,
       ""
     ].join("\n");
 

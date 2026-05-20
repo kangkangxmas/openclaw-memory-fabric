@@ -77,6 +77,70 @@ describe("RecallOrchestrator.plan()", () => {
   });
 });
 
+describe("RecallOrchestrator.plan() — taskType detection", () => {
+  const orch = new RecallOrchestrator(makeClient() as never, baseConfig);
+
+  it("returns general for empty message", () => {
+    const p = orch.plan({ agentId: "a1" });
+    assert.equal(p.taskType, "general");
+  });
+
+  it("returns general for short generic message", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "hello world" });
+    assert.equal(p.taskType, "general");
+  });
+
+  it("detects code_review for PR review messages", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "please review this PR" });
+    assert.equal(p.taskType, "code_review");
+  });
+
+  it("detects code_review for Chinese review keywords", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "帮我做一下代码审查" });
+    assert.equal(p.taskType, "code_review");
+  });
+
+  it("detects debug for error messages", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "there is a bug causing an error" });
+    assert.equal(p.taskType, "debug");
+  });
+
+  it("detects debug for Chinese debug keywords", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "系统报错了，帮我排查一下异常" });
+    assert.equal(p.taskType, "debug");
+  });
+
+  it("detects architecture for design messages", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "analyze the system design architecture and module dependencies" });
+    assert.equal(p.taskType, "architecture");
+  });
+
+  it("detects devops for deployment messages", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "deploy the service to kubernetes" });
+    assert.equal(p.taskType, "devops");
+  });
+
+  it("detects qa for test-related messages", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "write test cases for coverage" });
+    assert.equal(p.taskType, "qa");
+  });
+
+  it("detects documentation for doc-related messages", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "update the README doc" });
+    assert.equal(p.taskType, "documentation");
+  });
+
+  it("detects refactor for refactoring messages", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "refactor this module and simplify" });
+    assert.equal(p.taskType, "refactor");
+  });
+
+  it("detects refactor for Chinese refactor keywords", () => {
+    const p = orch.plan({ agentId: "a1", latestMessage: "重构这个模块并提取公共方法" });
+    assert.equal(p.taskType, "refactor");
+  });
+});
+
 describe("RecallOrchestrator.execute()", () => {
   it("returns a brief string and sources array on success", async () => {
     const orch = new RecallOrchestrator(makeClient() as never, baseConfig);
@@ -112,6 +176,34 @@ describe("RecallOrchestrator.execute()", () => {
     const ctx = { agentId: "a1", projectId: "p1", latestMessage: "x".repeat(210) };
     const result = await orch.execute(ctx);
     assert.ok(!result.sources.some((s) => s.startsWith("graphify:")));
+  });
+
+  it("passes taskType to the sidecar recall request", async () => {
+    let capturedReq: Record<string, unknown> = {};
+    const client = makeClient({
+      recall: async (req: Record<string, unknown>) => {
+        capturedReq = req;
+        return { memoryBrief: "brief", sources: ["s"], budgetUsed: 10 };
+      }
+    });
+    const orch = new RecallOrchestrator(client as never, baseConfig);
+    await orch.execute({ agentId: "a1", latestMessage: "fix the bug error" });
+    assert.equal(capturedReq.taskType, "debug");
+  });
+
+  it("requests extra carrier files for debug task type at l1", async () => {
+    let capturedFiles: string[] = [];
+    const client = makeClient({
+      carrierRead: async (req: { files?: string[] }) => {
+        capturedFiles = req.files ?? [];
+        return { carriers: [] };
+      }
+    });
+    const orch = new RecallOrchestrator(client as never, baseConfig);
+    // Long debug message → l1+ depth, projectId to trigger carrier read
+    await orch.execute({ agentId: "a1", projectId: "p1", latestMessage: "x".repeat(210) + " bug error" });
+    assert.ok(capturedFiles.includes("open-questions.md"), "debug should include open-questions.md");
+    assert.ok(capturedFiles.includes("entities-glossary.md"), "debug should include entities-glossary.md");
   });
 
   it("includes carrier source at l1 when carriers are populated", async () => {

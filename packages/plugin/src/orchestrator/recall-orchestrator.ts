@@ -1,5 +1,5 @@
 import type { SidecarClient } from "../utils/sidecar-client.js";
-import type { MemoryFabricConfig, RecallDepth, MemoryScope } from "../types/index.js";
+import type { MemoryFabricConfig, RecallDepth, MemoryScope, TaskType } from "../types/index.js";
 import type { MetricsCollector } from "../utils/metrics.js";
 
 // ---------------------------------------------------------------------------
@@ -43,6 +43,75 @@ function detectScope(ctx: RecallContext, cfg: MemoryFabricConfig): MemoryScope {
 }
 
 // ---------------------------------------------------------------------------
+// Task-type keyword detection
+// ---------------------------------------------------------------------------
+
+type MarkerFn = (msg: string) => boolean;
+
+const TASK_TYPE_MARKERS: Array<[TaskType, MarkerFn[]]> = [
+  ["code_review", [
+    (m) => /\breview\b|PR\b|pull\s*request|diff\b|approve|LGTM/i.test(m),
+    (m) => /代码审查|评审|code\s*quality|review\s*comment/i.test(m),
+  ]],
+  ["debug", [
+    (m) => /\bbug\b|\berror\b|stack\s*trace|crash|exception/i.test(m),
+    (m) => /报错|异常|排查|排障|debug|troubleshoot|故障/i.test(m),
+  ]],
+  ["architecture", [
+    (m) => /architect|system\s*design|dependency\s*graph|模块设计/i.test(m),
+    (m) => /架构|设计方案|组件|module\s*design|high.level\s*design/i.test(m),
+  ]],
+  ["devops", [
+    (m) => /deploy|CI\/CD|pipeline|container|docker|kubernetes|terraform/i.test(m),
+    (m) => /部署|运维|发布|上线|k8s|helm/i.test(m),
+  ]],
+  ["qa", [
+    (m) => /\btest\b|coverage|assertion|regression|benchmark/i.test(m),
+    (m) => /测试|覆盖率|断言|回归|用例|test\s*case/i.test(m),
+  ]],
+  ["documentation", [
+    (m) => /\bdoc\b|README|API\s*reference|changelog|specification/i.test(m),
+    (m) => /文档|说明|注释|comment|写文档|补充文档/i.test(m),
+  ]],
+  ["refactor", [
+    (m) => /refactor|rename|extract|simplify|clean\s*up/i.test(m),
+    (m) => /重构|提取|简化|优化代码|整理/i.test(m),
+  ]],
+];
+
+function detectTaskType(ctx: RecallContext): TaskType {
+  const msg = ctx.latestMessage ?? "";
+  if (!msg) return "general";
+
+  let bestType: TaskType = "general";
+  let bestScore = 0;
+
+  for (const [taskType, markers] of TASK_TYPE_MARKERS) {
+    const score = markers.filter((fn) => fn(msg)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestType = taskType;
+    }
+  }
+
+  return bestScore >= 1 ? bestType : "general";
+}
+
+// ---------------------------------------------------------------------------
+// Extra carrier files per task type
+// ---------------------------------------------------------------------------
+
+const TASK_TYPE_EXTRA_CARRIERS = new Map<TaskType, string[]>([
+  ["code_review", ["decision-log.md", "playbooks.md"]],
+  ["debug", ["open-questions.md", "entities-glossary.md"]],
+  ["architecture", ["decision-log.md", "entities-glossary.md"]],
+  ["devops", ["playbooks.md"]],
+  ["qa", ["playbooks.md", "open-questions.md"]],
+  ["documentation", ["entities-glossary.md"]],
+  ["refactor", ["entities-glossary.md", "decision-log.md"]],
+]);
+
+// ---------------------------------------------------------------------------
 // RecallOrchestrator
 // ---------------------------------------------------------------------------
 
@@ -51,6 +120,7 @@ export interface RecallPlan {
   scope: MemoryScope;
   query: string;
   needsStructuralBrief: boolean;
+  taskType: TaskType;
 }
 
 export interface MemoryBriefResult {
@@ -74,8 +144,8 @@ export class RecallOrchestrator {
       depth,
       scope: detectScope(ctx, this.config),
       query: ctx.latestMessage ?? "",
-      // Structural brief when depth ≥ l1 and a project is active
-      needsStructuralBrief: depth !== "l0" && !!ctx.projectId
+      needsStructuralBrief: depth !== "l0" && !!ctx.projectId,
+      taskType: detectTaskType(ctx)
     };
   }
 
@@ -92,7 +162,8 @@ export class RecallOrchestrator {
       projectId: ctx.projectId,
       scope: recallPlan.scope,
       depth: recallPlan.depth,
-      query: recallPlan.query
+      query: recallPlan.query,
+      taskType: recallPlan.taskType
     });
 
     const sources = [...recallResp.sources];
@@ -126,10 +197,12 @@ export class RecallOrchestrator {
     // For L1/L2: also inject key carrier files
     if (recallPlan.depth !== "l0" && ctx.projectId) {
       try {
-        const carrierFiles =
+        const baseCarriers =
           recallPlan.depth === "l1"
             ? ["self-model.md", "project-model.md"]
             : ["self-model.md", "project-model.md", "decision-log.md", "entities-glossary.md"];
+        const extraCarriers = TASK_TYPE_EXTRA_CARRIERS.get(recallPlan.taskType) ?? [];
+        const carrierFiles = [...new Set([...baseCarriers, ...extraCarriers])];
 
         const carrierResp = await this.client.carrierRead({
           agentId: ctx.agentId,

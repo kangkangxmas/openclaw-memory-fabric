@@ -124,7 +124,7 @@ export async function buildServer() {
   });
 
   registerHealthRoute(app, cfg);
-  registerRecallRoute(app, openviking, shared);
+  registerRecallRoute(app, openviking, shared, patStore);
   registerCommitRoute(app, openviking, expService);
   registerCarrierRoutes(app, carriers);
   registerDistillRoute(app, distill);

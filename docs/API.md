@@ -65,7 +65,7 @@ Base URL: `http://127.0.0.1:7811`
 
 ## POST /recall
 
-召回记忆，支持 TF-IDF / Hybrid（语义+TF-IDF）排序。
+召回记忆，支持 TF-IDF / Hybrid（语义+TF-IDF）排序。Phase G 新增 `taskType` 字段，启用任务类型驱动的动态注入模板。
 
 **Request:**
 ```json
@@ -75,16 +75,33 @@ Base URL: `http://127.0.0.1:7811`
   "scope": "private",
   "query": "memory storage",
   "depth": "l0",
-  "limit": 10
+  "taskType": "debug"
 }
 ```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| agentId | string | 是 | Agent 标识 |
+| projectId | string | 否 | 项目标识 |
+| scope | string | 否 | private / project / shared / auto |
+| depth | string | 否 | l0 / l1 / l2 (默认 l0) |
+| query | string | 否 | 检索关键词 |
+| taskType | string | 否 | 任务类型 (Phase G)，影响 brief 模板选择 |
+
+有效 taskType 值: `code_review`, `debug`, `architecture`, `devops`, `qa`, `documentation`, `refactor`, `general`
+
+不同 taskType 会：
+- 调整 Memory Brief 中的 section 排序 (重点信息优先展示)
+- 给重点 section 分配更多条目预算
+- 自动注入该类型对应的 Learned Patterns (来自 PatternStore)
 
 **Response:**
 ```json
 {
-  "ok": true,
-  "entries": [...],
-  "brief": "formatted brief text"
+  "memoryBrief": "## Memory Brief\nAgent: development | ...",
+  "sources": ["openviking:private:l0", "patterns:debug"],
+  "budgetUsed": 200,
+  "taskType": "debug"
 }
 ```
 

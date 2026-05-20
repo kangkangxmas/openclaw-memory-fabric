@@ -10,6 +10,7 @@ import type { SidecarConfig } from "../config/index.js";
 import { readJsonl, appendJsonl, ensureDir } from "../utils/jsonl.js";
 import type { VectorService } from "./vector-service.js";
 import { computeDecayScore, readSummaryVersion, updateSummaryWithVersion } from "./lifecycle-service.js";
+import { getTemplateConfig, formatBriefWithTemplate } from "./brief-templates.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +32,7 @@ export interface RecallResult {
   memoryBrief: string;
   sources: string[];
   budgetUsed: number;
+  taskType?: string;
 }
 
 export interface CommitPayload {
@@ -240,8 +242,9 @@ export class OpenVikingService {
     scope?: string;
     depth?: string;
     query?: string;
+    taskType?: string;
   }): Promise<RecallResult> {
-    const { agentId, projectId, query = "" } = opts;
+    const { agentId, projectId, query = "", taskType } = opts;
     const scope = resolveScope(opts.scope);
     const depth = opts.depth ?? "l0";
     const maxEntries = MAX_ENTRIES_BY_DEPTH[depth] ?? 5;
@@ -291,13 +294,14 @@ export class OpenVikingService {
         .map((s) => s.entry);
     }
 
-    const brief = this.formatBrief(scored, { agentId, projectId, scope, depth });
+    const brief = this.formatBrief(scored, { agentId, projectId, scope, depth, taskType });
     const budgetUsed = Math.min(brief.length, DEPTH_BUDGET[depth] ?? 600);
 
     return {
       memoryBrief: brief,
       sources: sourceLabels.length > 0 ? sourceLabels : [`openviking:empty`],
-      budgetUsed
+      budgetUsed,
+      taskType
     };
   }
 
@@ -487,31 +491,15 @@ export class OpenVikingService {
 
   private formatBrief(
     entries: MemoryEntry[],
-    ctx: { agentId: string; projectId?: string; scope: MemoryScope; depth: string }
+    ctx: { agentId: string; projectId?: string; scope: MemoryScope; depth: string; taskType?: string }
   ): string {
-    if (entries.length === 0) {
-      return `## Memory Brief\nNo memories found for agent=${ctx.agentId} scope=${ctx.scope} depth=${ctx.depth}.\n`;
-    }
-
-    const byType = new Map<string, string[]>();
-    for (const e of entries) {
-      const arr = byType.get(e.type) ?? [];
-      arr.push(e.content);
-      byType.set(e.type, arr);
-    }
-
-    const lines: string[] = [
-      `## Memory Brief`,
-      `Agent: ${ctx.agentId}${ctx.projectId ? ` | Project: ${ctx.projectId}` : ""} | Scope: ${ctx.scope} | Depth: ${ctx.depth}`,
-      ""
-    ];
-
-    for (const [type, items] of byType) {
-      lines.push(`### ${type.charAt(0).toUpperCase() + type.slice(1)}s`);
-      items.forEach((item) => lines.push(`- ${item}`));
-      lines.push("");
-    }
-
-    return lines.join("\n");
+    const template = getTemplateConfig(ctx.taskType);
+    const maxEntries = MAX_ENTRIES_BY_DEPTH[ctx.depth] ?? 5;
+    return formatBriefWithTemplate(
+      entries.map((e) => ({ type: e.type, content: e.content })),
+      ctx,
+      template,
+      maxEntries
+    );
   }
 }

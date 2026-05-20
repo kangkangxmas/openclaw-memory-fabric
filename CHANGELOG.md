@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## 1.8.0 - 2026-05-21
+
+### Phase G: 任务类型驱动动态注入模板
+- `RecallOrchestrator` 新增 `detectTaskType()` 关键词检测 — 支持 8 种任务类型 (code_review/debug/architecture/devops/qa/documentation/refactor/general), 中英双语关键词匹配
+- `brief-templates.ts`: 模板注册表 — 每种任务类型定义专属 section 排序、重点强调和预算分配
+- `formatBriefWithTemplate()`: 按模板渲染 Memory Brief，重点 section 获得 1.5x 条目预算
+- `/recall` API 新增可选 `taskType` 字段，支持模板驱动格式化 + Learned Patterns 注入
+- 按任务类型自动选择额外 carrier 文件 (如 debug → open-questions.md + entities-glossary.md)
+- `before_prompt_build` hook metadata 注释增加 `taskType` 字段
+- 测试: 54 plugin + 124 sidecar = **178 总测试** (+31)
+
+---
+
 ## 1.7.0 - 2026-05-20
 
 ### Phase B: Inspector Web UI 重构
