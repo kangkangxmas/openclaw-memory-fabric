@@ -163,11 +163,72 @@ function resolveScope(raw: string | undefined): MemoryScope {
 // OpenVikingService
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// E1: In-memory index cache for fast recall
+// ---------------------------------------------------------------------------
+
+interface IndexEntry {
+  entries: MemoryEntry[];
+  loadedAt: number;
+}
+
+/** Cache TTL: 60 seconds */
+const INDEX_TTL_MS = 60_000;
+
 export class OpenVikingService {
+  /** E1: Per-scope index cache to avoid repeated JSONL full-scan */
+  private readonly indexCache = new Map<string, IndexEntry>();
+
   constructor(
     private readonly cfg: SidecarConfig["openviking"],
     private readonly vectorService?: VectorService
   ) {}
+
+  /** Load entries for a scope, using cache if fresh. */
+  private async loadScopeEntries(
+    agentId: string,
+    scope: MemoryScope,
+    projectId?: string,
+  ): Promise<MemoryEntry[]> {
+    const dir = resolveScopePath({
+      basePath: this.cfg.basePath,
+      targetRoot: this.cfg.targetRoot,
+      agentId,
+      scope,
+      projectId,
+    });
+    const memoriesPath = join(dir, "memories.jsonl");
+    const cacheKey = memoriesPath;
+
+    const cached = this.indexCache.get(cacheKey);
+    if (cached && Date.now() - cached.loadedAt < INDEX_TTL_MS) {
+      return cached.entries;
+    }
+
+    try {
+      const entries = await readJsonl<MemoryEntry>(memoriesPath);
+      this.indexCache.set(cacheKey, { entries, loadedAt: Date.now() });
+      return entries;
+    } catch {
+      return [];
+    }
+  }
+
+  /** Invalidate cache for a scope (call after writes). */
+  private invalidateCache(
+    agentId: string,
+    scope: MemoryScope,
+    projectId?: string,
+  ): void {
+    const dir = resolveScopePath({
+      basePath: this.cfg.basePath,
+      targetRoot: this.cfg.targetRoot,
+      agentId,
+      scope,
+      projectId,
+    });
+    this.indexCache.delete(join(dir, "memories.jsonl"));
+  }
 
   // -------------------------------------------------------------------------
   // recallMemory
@@ -190,22 +251,10 @@ export class OpenVikingService {
     const sourceLabels: string[] = [];
 
     for (const s of scopesToRead) {
-      try {
-        const dir = resolveScopePath({
-          basePath: this.cfg.basePath,
-          targetRoot: this.cfg.targetRoot,
-          agentId,
-          scope: s,
-          projectId
-        });
-        const memoriesPath = join(dir, "memories.jsonl");
-        const entries = await readJsonl<MemoryEntry>(memoriesPath);
-        if (entries.length > 0) {
-          allEntries.push(...entries);
-          sourceLabels.push(`openviking:${s}:${depth}`);
-        }
-      } catch {
-        // scope path may not exist yet — skip gracefully
+      const entries = await this.loadScopeEntries(agentId, s, projectId);
+      if (entries.length > 0) {
+        allEntries.push(...entries);
+        sourceLabels.push(`openviking:${s}:${depth}`);
       }
     }
 
@@ -311,6 +360,9 @@ export class OpenVikingService {
       }
     }
 
+    // E1: Invalidate index cache after write
+    this.invalidateCache(agentId, scope, projectId);
+
     // D3: Update summary with optimistic version locking
     const summaryPath = join(dir, "summary.json");
     const currentVersion = await readSummaryVersion(summaryPath);
@@ -391,20 +443,8 @@ export class OpenVikingService {
 
     const allEntries: MemoryEntry[] = [];
     for (const s of scopesToRead) {
-      try {
-        const dir = resolveScopePath({
-          basePath: this.cfg.basePath,
-          targetRoot: this.cfg.targetRoot,
-          agentId,
-          scope: s,
-          projectId
-        });
-        const memoriesPath = join(dir, "memories.jsonl");
-        const entries = await readJsonl<MemoryEntry>(memoriesPath);
-        allEntries.push(...entries);
-      } catch {
-        // scope path may not exist yet — skip gracefully
-      }
+      const entries = await this.loadScopeEntries(agentId, s, projectId);
+      allEntries.push(...entries);
     }
 
     const normalizedQuery = query.trim().toLowerCase();

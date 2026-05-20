@@ -29,6 +29,7 @@ import { EmbeddingService } from "./services/embedding-service.js";
 import { VectorService } from "./services/vector-service.js";
 import { ScoringService } from "./services/scoring-service.js";
 import { SharingService } from "./services/sharing-service.js";
+import { registerBatchRoutes } from "./routes/batch.js";
 import { runGarbageCollection } from "./services/lifecycle-service.js";
 import type { ErrorResponse } from "./models/index.js";
 
@@ -132,6 +133,7 @@ export async function buildServer() {
   registerPatternsRoute(app, patService);
   registerSkillsRoute(app, skillGen);
   registerReportRoute(app, scoringService, expStore);
+  registerBatchRoutes(app, openviking, graphify);
 
   // D4: Garbage collection endpoint
   app.post("/lifecycle/gc", async () => {

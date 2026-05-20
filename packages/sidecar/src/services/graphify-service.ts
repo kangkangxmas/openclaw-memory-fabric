@@ -484,6 +484,114 @@ export class GraphifyService {
   }
 
   // -------------------------------------------------------------------------
+  // E3: Incremental update — only process changed files
+  // -------------------------------------------------------------------------
+
+  async incrementalUpdate(
+    projectId: string,
+    changedFiles: string[],
+  ): Promise<{ updated: number; nodesAdded: number; edgesAdded: number }> {
+    validateId(projectId, "projectId");
+    const graphPath = this.graphJsonPath(projectId);
+    if (!existsSync(graphPath)) {
+      // No base graph — need full bootstrap first
+      return { updated: 0, nodesAdded: 0, edgesAdded: 0 };
+    }
+
+    const graph = await this.loadGraph(projectId);
+    const existingNodeIds = new Set(graph.nodes.map((n) => n.id));
+    let nodesAdded = 0;
+    let edgesAdded = 0;
+
+    // Process only the changed files
+    const newFileEntities = new Map<string, string[]>();
+    for (const fp of changedFiles) {
+      const resolved = fp.startsWith("~")
+        ? join(process.env.HOME ?? "/", fp.slice(1))
+        : resolve(fp);
+      if (!existsSync(resolved)) continue;
+      try {
+        const st = statSync(resolved);
+        if (!st.isFile()) continue;
+        if (!SCANNABLE_EXT.has(extname(resolved))) continue;
+        const content = await readFile(resolved, "utf8");
+        if (approxTokens(content) > 20000) continue;
+        newFileEntities.set(resolved, extractEntities(resolved, content));
+      } catch {
+        continue;
+      }
+    }
+
+    // Add new nodes
+    for (const [fp, entities] of newFileEntities) {
+      for (const e of entities) {
+        const existing = graph.nodes.find((n) => n.id === e);
+        if (existing) {
+          if (!existing.files.includes(fp)) {
+            existing.files.push(fp);
+            existing.mentions++;
+          }
+        } else {
+          graph.nodes.push({
+            id: e,
+            type: /^[A-Z]/.test(e) ? "symbol" : "module",
+            files: [fp],
+            mentions: 1,
+          });
+          nodesAdded++;
+        }
+      }
+    }
+
+    // Add new edges from changed files
+    const edgeKey = (a: string, b: string) => [a, b].sort().join("|||");
+    const existingEdgeKeys = new Set(
+      graph.edges.map((e) => edgeKey(e.source, e.target)),
+    );
+
+    for (const [fp, entities] of newFileEntities) {
+      const uniq = [...new Set(entities)];
+      for (let i = 0; i < uniq.length; i++) {
+        for (let j = i + 1; j < uniq.length; j++) {
+          const key = edgeKey(uniq[i], uniq[j]);
+          if (existingEdgeKeys.has(key)) {
+            const edge = graph.edges.find(
+              (e) => edgeKey(e.source, e.target) === key,
+            );
+            if (edge && !edge.coocFiles.includes(fp)) {
+              edge.weight++;
+              edge.coocFiles.push(fp);
+            }
+          } else {
+            graph.edges.push({
+              source: uniq[i],
+              target: uniq[j],
+              weight: 1,
+              coocFiles: [fp],
+            });
+            existingEdgeKeys.add(key);
+            edgesAdded++;
+          }
+        }
+      }
+    }
+
+    // Re-sort and persist
+    graph.nodes.sort((a, b) => b.mentions - a.mentions);
+    graph.edges.sort((a, b) => b.weight - a.weight);
+    graph.generatedAt = new Date().toISOString();
+
+    await writeFile(
+      graphPath,
+      JSON.stringify(graph, null, 2),
+      "utf8",
+    );
+    await writeFile(this.reportPath(projectId), this.generateReport(graph), "utf8");
+
+    return { updated: changedFiles.length, nodesAdded, edgesAdded };
+  }
+
+  // -------------------------------------------------------------------------
   // On-demand refresh
   // -------------------------------------------------------------------------
 

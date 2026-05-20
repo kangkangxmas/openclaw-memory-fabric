@@ -28,11 +28,25 @@ interface OllamaEmbedResponse {
 // EmbeddingService
 // ---------------------------------------------------------------------------
 
+/** E2: Simple LRU cache for embedding results */
+const CACHE_MAX = 512;
+
 export class EmbeddingService {
+  private readonly cache = new Map<string, number[]>();
+
   constructor(private readonly config: EmbeddingConfig) {}
 
-  /** Generate an embedding vector for the given text. */
+  /** Generate an embedding vector for the given text (with LRU cache). */
   async embed(text: string): Promise<number[] | null> {
+    // E2: Check cache first
+    const key = text.slice(0, 200); // truncate key for memory efficiency
+    const cached = this.cache.get(key);
+    if (cached) {
+      // Move to end (most recent)
+      this.cache.delete(key);
+      this.cache.set(key, cached);
+      return cached;
+    }
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
@@ -61,15 +75,28 @@ export class EmbeddingService {
 
       if (!res.ok) {
         // Fallback: OpenAI-compatible /v1/embeddings
-        return this.embedOpenAI(text, controller.signal);
+        const vec = await this.embedOpenAI(text, controller.signal);
+        if (vec) this.cacheSet(key, vec);
+        return vec;
       }
 
       const data = (await res.json()) as OllamaEmbedResponse;
-      return data.embedding ?? null;
+      const result = data.embedding ?? null;
+      if (result) this.cacheSet(key, result);
+      return result;
     } catch {
       return null;
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  private cacheSet(key: string, vec: number[]): void {
+    this.cache.set(key, vec);
+    if (this.cache.size > CACHE_MAX) {
+      // Evict oldest (first inserted)
+      const first = this.cache.keys().next().value;
+      if (first !== undefined) this.cache.delete(first);
     }
   }
 
