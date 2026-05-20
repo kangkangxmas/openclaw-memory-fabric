@@ -1,8 +1,8 @@
 # OpenClaw Memory Fabric
 ## 安装与部署文档
-**文档版本**：v1.0  
+**文档版本**：v1.8.0  
 **文档类型**：安装部署手册  
-**发布日期**：2026-04-15  
+**发布日期**：2026-05-21  
 **适用对象**：平台工程师、运维工程师、研发负责人、POC 实施人员
 
 ---
@@ -274,8 +274,8 @@ curl http://127.0.0.1:7811/health
 {
   "ok": true,
   "service": "@openclaw-memory-fabric/sidecar",
-  "version": "1.6.0",
-  "phase": "phase-14-gap-closure",
+  "version": "1.8.0",
+  "phase": "phase-G-dynamic-templates",
   "components": {
     "openviking": {
       "reachable": true
@@ -418,6 +418,107 @@ runtime-data/carriers/agents/<agent_id>/projects/phoenix-rewrite/
 - [ ] 显式 publish 后项目内其他 Agent 可见
 - [ ] 撤回后不参与默认召回
 
+## 14.5 自学习闭环验证 (Phase C)
+- [ ] 经验蒸馏后 `GET /report?agentId=X` 返回评分报告
+- [ ] `GET /patterns?agentId=X` 返回检测到的模式
+- [ ] self-model.md 中 confidence 随经验累积自动演进
+- [ ] 学习曲线: `GET /inspect/learning-curve?agentId=X&days=30` 返回数据
+
+验证命令：
+```bash
+# 查看评分报告
+curl "http://127.0.0.1:7811/report?agentId=development"
+
+# 查看模式
+curl "http://127.0.0.1:7811/patterns?agentId=development"
+
+# 查看学习曲线
+curl "http://127.0.0.1:7811/inspect/learning-curve?agentId=development&days=30"
+```
+
+## 14.6 生命周期管理验证 (Phase D)
+- [ ] 垃圾回收端点可调用
+- [ ] 超 1000 条记忆时自动压缩到 750 条
+- [ ] summary.json 版本号自动递增
+
+验证命令：
+```bash
+# 触发垃圾回收
+curl -X POST http://127.0.0.1:7811/lifecycle/gc
+# 期望: { "ok": true, "sharedRetracted": 0, "draftsRemoved": 0, "memoriesCompacted": [...] }
+```
+
+## 14.7 性能与扩展验证 (Phase E)
+- [ ] 批量召回端点可用 (最多 10 并发)
+- [ ] 增量图谱更新可用
+- [ ] 嵌入缓存生效 (相同文本第二次调用 <5ms)
+
+验证命令：
+```bash
+# 批量召回
+curl -X POST http://127.0.0.1:7811/batch/recall \
+  -H "Content-Type: application/json" \
+  -d '{"requests":[{"agentId":"a1","depth":"l0"},{"agentId":"a2","depth":"l0"}]}'
+
+# 增量图谱更新
+curl -X POST http://127.0.0.1:7811/graph/incremental \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":"my-project","changedFiles":["/path/to/changed.ts"]}'
+```
+
+## 14.8 联邦功能验证 (Phase F)
+- [ ] 跨项目知识导出/导入/撤回
+- [ ] 依赖图谱可查询
+- [ ] 自适应预算推荐端点可用
+- [ ] 审批提交→待审→审核 流程完整
+
+验证命令：
+```bash
+# 导出知识
+curl -X POST http://127.0.0.1:7811/federation/export \
+  -H "Content-Type: application/json" \
+  -d '{"sourceProject":"alpha","targetProject":"beta","agentId":"a1","entries":[{"type":"fact","content":"API uses REST"}]}'
+
+# 查看依赖图谱
+curl http://127.0.0.1:7811/federation/dependencies
+
+# 自适应预算推荐
+curl -X POST http://127.0.0.1:7811/federation/recommend-budget \
+  -H "Content-Type: application/json" \
+  -d '{"toolCount":8,"turnCount":15,"queryLength":200}'
+
+# 提交审批
+curl -X POST http://127.0.0.1:7811/federation/approval/submit \
+  -H "Content-Type: application/json" \
+  -d '{"sourceAgent":"a1","projectId":"proj","type":"decision","content":"switch to gRPC"}'
+
+# 查看待审批
+curl "http://127.0.0.1:7811/federation/approval/pending?projectId=proj"
+```
+
+## 14.9 动态注入模板验证 (Phase G)
+- [ ] 不同任务类型返回不同格式的 Memory Brief
+- [ ] taskType 出现在 response 中
+- [ ] 不传 taskType 行为不变 (向后兼容)
+
+验证命令：
+```bash
+# debug 任务类型 — 期望 Entities 和 Unresolved 在 Facts 之前
+curl -X POST http://127.0.0.1:7811/recall \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"dev","taskType":"debug","depth":"l1"}'
+
+# code_review 任务类型 — 期望 Decisions 和 Patterns 优先
+curl -X POST http://127.0.0.1:7811/recall \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"dev","taskType":"code_review","depth":"l1"}'
+
+# 不传 taskType — 与旧版行为一致
+curl -X POST http://127.0.0.1:7811/recall \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"dev","depth":"l0"}'
+```
+
 ---
 
 ## 15. 生产部署建议
@@ -545,19 +646,48 @@ curl http://127.0.0.1:7811/health
 
 ## 19. 最终上线检查表
 
+### 基础设施
 - [ ] OpenClaw 版本已验证
 - [ ] OpenViking 安装完成
 - [ ] Graphify 安装完成
 - [ ] 插件安装并启用
-- [ ] Skills 已发现
-- [ ] Sidecar 正常
+- [ ] Skills 已发现 (4 个内置 + auto-generated 目录)
+- [ ] Sidecar 正常 (/health 返回 ok:true)
+- [ ] Inspector Web UI 可访问 (http://127.0.0.1:7811/inspect)
+
+### 核心功能
 - [ ] 示例项目已 bootstrap
 - [ ] 跨天记忆验证通过
 - [ ] 多 Agent 隔离验证通过
 - [ ] 复杂项目结构优先验证通过
 - [ ] 共享治理验证通过
+
+### 自学习增强 (Phase C)
+- [ ] 经验蒸馏自动产出 (experiences.jsonl 有内容)
+- [ ] 评分报告可查看 (/report)
+- [ ] 模式检测可查看 (/patterns)
+
+### 生命周期 (Phase D)
+- [ ] 垃圾回收端点可用 (/lifecycle/gc)
+- [ ] 衰减评分整合进 recall 排序
+
+### 性能 (Phase E)
+- [ ] 批量操作端点可用 (/batch/recall, /batch/commit)
+- [ ] 增量图谱更新可用 (/graph/incremental)
+
+### 联邦 (Phase F)
+- [ ] 跨项目导出/导入可用
+- [ ] 审批流可用
+- [ ] 自适应预算推荐可用
+
+### 动态模板 (Phase G)
+- [ ] /recall 带 taskType 返回定制化 brief
+- [ ] 不带 taskType 向后兼容
+
+### 运维
 - [ ] 备份策略已就绪
 - [ ] 日志与监控已就绪
+- [ ] LLM 配置验证 (可选: EXPERIENCE_LLM_*, EMBEDDING_*)
 
 ---
 
