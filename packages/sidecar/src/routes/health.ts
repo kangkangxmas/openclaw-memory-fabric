@@ -36,8 +36,8 @@ export function registerHealthRoute(app: FastifyInstance, cfg: SidecarConfig): v
     return {
       ok,
       service: "@openclaw-memory-fabric/sidecar",
-      version: "1.6.0",
-      phase: "phase-14-gap-closure",
+      version: "1.8.0",
+      phase: "phase-G-dynamic-templates",
       uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
       lastRefreshTime: new Date().toISOString(),
       components: {
