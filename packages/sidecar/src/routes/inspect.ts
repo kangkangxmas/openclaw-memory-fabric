@@ -42,27 +42,36 @@ export function registerInspectRoutes(
       );
   });
 
-  // Agent 列表端点
+  // Agent 列表端点 — 合并 OpenViking + Carriers 两个来源
   app.get("/inspect/agents", async (_request, reply) => {
+    const exclude = new Set(["shared", "agents"]);
+    const agentSet = new Set<string>();
+
+    // Source 1: OpenViking agents directory
     try {
-      const agentsDir = join(
-        process.env.HOME ?? "/tmp",
-        ".openviking",
-        "data",
-        "viking",
-        "openclaw-personal",
-        "org",
-        "default",
-        "agents",
+      const ovDir = join(
+        process.env.OPENVIKING_BASE_PATH ?? join(process.env.HOME ?? "/tmp", ".openviking", "data", "viking", "openclaw-personal"),
+        "org", "default", "agents",
       );
-      const agents = readdirSync(agentsDir, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name)
-        .filter((name) => name !== "shared" && name !== "agents");
-      return reply.send({ ok: true, agents });
-    } catch {
-      return reply.send({ ok: true, agents: ["development", "boss"] });
-    }
+      if (existsSync(ovDir)) {
+        for (const d of readdirSync(ovDir, { withFileTypes: true })) {
+          if (d.isDirectory() && !exclude.has(d.name)) agentSet.add(d.name);
+        }
+      }
+    } catch { /* non-fatal */ }
+
+    // Source 2: Carriers agents directory
+    try {
+      const carriersDir = join(process.env.CARRIERS_ROOT ?? join(process.env.HOME ?? "/tmp", ".memory-fabric", "carriers"), "agents");
+      if (existsSync(carriersDir)) {
+        for (const d of readdirSync(carriersDir, { withFileTypes: true })) {
+          if (d.isDirectory() && !exclude.has(d.name)) agentSet.add(d.name);
+        }
+      }
+    } catch { /* non-fatal */ }
+
+    const agents = [...agentSet].sort();
+    return reply.send({ ok: true, agents });
   });
 
   app.post<{
