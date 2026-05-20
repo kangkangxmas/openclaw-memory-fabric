@@ -499,7 +499,6 @@ export class GraphifyService {
     }
 
     const graph = await this.loadGraph(projectId);
-    const existingNodeIds = new Set(graph.nodes.map((n) => n.id));
     let nodesAdded = 0;
     let edgesAdded = 0;
 

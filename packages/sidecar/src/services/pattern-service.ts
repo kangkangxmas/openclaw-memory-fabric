@@ -31,7 +31,7 @@ export interface PatternDetectionResult {
   scannedCount: number;
 }
 
-interface Cluster {
+interface _Cluster {
   taskType: string;
   entries: ExperienceEntry[];
 }
@@ -187,7 +187,7 @@ async function extractCommonLessonsLLM(
     .replace(/\s*```$/i, "");
 
   try {
-    const parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(cleaned) as unknown;
     if (Array.isArray(parsed)) {
       return parsed.filter((s) => typeof s === "string").slice(0, 3);
     }

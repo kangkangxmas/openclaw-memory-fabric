@@ -27,7 +27,7 @@ const DECAY_RATE_PER_DAY = 0.02;
 /** Minimum decay score — entries below this are eligible for eviction */
 const MIN_DECAY_SCORE = 0.1;
 /** Maximum age in days before an entry is considered for archival */
-const MAX_AGE_DAYS = 180;
+const _MAX_AGE_DAYS = 180;
 
 /**
  * Compute a decay score for a memory entry.

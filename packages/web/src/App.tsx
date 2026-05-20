@@ -9,6 +9,7 @@ import { MemoryBrowser } from "./pages/MemoryBrowser";
 import { GraphView } from "./pages/GraphView";
 import { CarrierViewer } from "./pages/CarrierViewer";
 import { LearningDashboard } from "./pages/LearningDashboard";
+import { FederationPage } from "./pages/FederationPage";
 
 export interface AppContext {
   agentId: string;
@@ -69,6 +70,7 @@ export default function App() {
         {page === "graph" && <GraphView ctx={ctx} />}
         {page === "carriers" && <CarrierViewer ctx={ctx} />}
         {page === "learning" && <LearningDashboard ctx={ctx} />}
+        {page === "federation" && <FederationPage ctx={ctx} />}
       </Layout>
     </div>
   );

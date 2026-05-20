@@ -4,10 +4,11 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import type { SidecarClient } from "../src/utils/sidecar-client.js";
 
 // Minimal stub for SidecarClient — only the methods needed per tool
 function makeClient(overrides: Record<string, (...args: unknown[]) => unknown>) {
-  return overrides as unknown as import("../src/utils/sidecar-client.js").SidecarClient;
+  return overrides as unknown as SidecarClient;
 }
 
 // ---------------------------------------------------------------------------

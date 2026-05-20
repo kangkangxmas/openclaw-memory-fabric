@@ -14,6 +14,7 @@ const NAV_ITEMS: { page: Page; label: string }[] = [
   { page: "graph", label: "知识图谱" },
   { page: "carriers", label: "载体文件" },
   { page: "learning", label: "自学习" },
+  { page: "federation", label: "联邦" },
 ];
 
 const SCOPES: Scope[] = ["project", "private", "shared", "auto"];

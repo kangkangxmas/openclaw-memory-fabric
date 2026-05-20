@@ -11,11 +11,11 @@
  * All operations are fire-and-forget — they never block the commit response.
  */
 
-import type { CarrierRepository, CarrierReadResult } from "./carrier-service.js";
+import type { CarrierRepository } from "./carrier-service.js";
 import type { DistillLLMConfig } from "./distill-service.js";
 import type { PatternService } from "./pattern-service.js";
 import type { ScoringService } from "./scoring-service.js";
-import { ExperienceStore } from "../stores/experience-store.js";
+import type { ExperienceStore } from "../stores/experience-store.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -276,7 +276,7 @@ export class ExperienceService {
       outcome?: string;
     };
     try {
-      parsed = JSON.parse(cleaned);
+      parsed = JSON.parse(cleaned) as typeof parsed;
     } catch {
       await this.storeHeuristicOnly(ctx);
       return;

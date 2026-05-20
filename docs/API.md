@@ -181,4 +181,172 @@ Base URL: `http://127.0.0.1:7811`
 
 ---
 
-*文档版本: P0-P2 | 更新日期: 2026-05-07*
+## POST /batch/recall
+
+批量召回（Phase E），并行处理多个 agent 的 recall 请求。
+
+**Request:**
+```json
+{
+  "requests": [
+    { "agentId": "agent-1", "projectId": "proj", "depth": "l0" },
+    { "agentId": "agent-2", "projectId": "proj", "query": "auth" }
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "results": [
+    { "ok": true, "agentId": "agent-1", "memoryBrief": "...", "sources": [...], "budgetUsed": 200 },
+    { "ok": true, "agentId": "agent-2", "memoryBrief": "...", "sources": [...], "budgetUsed": 350 }
+  ]
+}
+```
+
+> 最多 10 个并发请求。失败的请求返回 `{ "ok": false, "error": "message" }`。
+
+---
+
+## POST /batch/commit
+
+批量提交（Phase E），并行处理多个 commit payload。
+
+**Request:**
+```json
+{
+  "commits": [
+    { "agentId": "a1", "projectId": "p1", "facts": ["fact-1"] },
+    { "agentId": "a2", "projectId": "p1", "decisions": ["use gRPC"] }
+  ]
+}
+```
+
+---
+
+## POST /graph/incremental
+
+增量图谱更新（Phase E），只处理变更文件。
+
+**Request:**
+```json
+{
+  "projectId": "my-project",
+  "changedFiles": ["/path/to/changed-file.ts"]
+}
+```
+
+**Response:**
+```json
+{ "ok": true, "updated": 1, "nodesAdded": 3, "edgesAdded": 5 }
+```
+
+---
+
+## POST /lifecycle/gc
+
+垃圾回收（Phase D），清理过期数据。
+
+**Response:**
+```json
+{
+  "ok": true,
+  "sharedRetracted": 2,
+  "draftsRemoved": 1,
+  "memoriesCompacted": [{ "path": "...", "before": 1050, "after": 750, "removed": 300 }]
+}
+```
+
+---
+
+## GET /inspect/learning-curve?agentId={agentId}&days={days}
+
+学习曲线数据（Phase C），按日聚合经验统计。
+
+**Response:**
+```json
+{
+  "ok": true,
+  "curve": [
+    { "date": "2026-05-15", "experiences": 3, "avgScore": 72.5, "successRate": 0.67, "patterns": 2 }
+  ]
+}
+```
+
+---
+
+## POST /federation/export
+
+跨项目知识导出（Phase F）。
+
+**Request:**
+```json
+{
+  "sourceProject": "project-alpha",
+  "targetProject": "project-beta",
+  "agentId": "agent-1",
+  "entries": [{ "type": "fact", "content": "API uses REST" }]
+}
+```
+
+---
+
+## GET /federation/import?projectId={projectId}
+
+导入其他项目的联邦知识。
+
+---
+
+## POST /federation/revoke
+
+撤回已导出条目。
+
+**Request:** `{ "projectId": "target", "entryId": "fed-xxx" }`
+
+---
+
+## GET /federation/dependencies
+
+查看多项目依赖图谱。
+
+**Response:**
+```json
+{
+  "projects": ["alpha", "beta"],
+  "dependencies": [{ "from": "alpha", "to": "beta", "strength": 3, "sharedEntities": ["PostgreSQL"] }]
+}
+```
+
+---
+
+## POST /federation/recommend-budget
+
+自适应记忆预算推荐（Phase F）。
+
+**Request:** `{ "toolCount": 8, "turnCount": 15, "queryLength": 200 }`
+
+**Response:** `{ "depth": "l2", "tokenBudget": 5000, "reason": "high complexity (score=7)" }`
+
+---
+
+## POST /federation/approval/submit
+
+提交待审核条目（Phase F）。
+
+**Request:** `{ "sourceAgent": "agent-1", "projectId": "proj", "type": "decision", "content": "switch to gRPC" }`
+
+## GET /federation/approval/pending?projectId={projectId}
+
+查看待审批列表。
+
+## POST /federation/approval/review
+
+审批条目。
+
+**Request:** `{ "entryId": "appr-xxx", "decision": "approved", "reviewedBy": "reviewer-1" }`
+
+---
+
+*文档版本: v1.7.0 (Phase A-F) | 更新日期: 2026-05-20*

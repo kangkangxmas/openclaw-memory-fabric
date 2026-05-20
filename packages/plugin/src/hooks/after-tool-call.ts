@@ -11,7 +11,7 @@ function summarise(result: unknown): string {
     const keys = Object.keys(result as Record<string, unknown>);
     return `{${keys.slice(0, 5).join(", ")}${keys.length > 5 ? ", …" : ""}}`;
   }
-  return String(result);
+  return String(result as number | boolean | bigint | symbol);
 }
 
 export function createAfterToolCallHandler(logger: Logger) {

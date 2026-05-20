@@ -70,6 +70,11 @@ async function post(path, body) {
   return { status: res.status, body: await res.json() };
 }
 
+async function get(path) {
+  const res = await fetch(`http://127.0.0.1:${E2E_PORT}${path}`);
+  return { status: res.status, body: await res.json() };
+}
+
 // ---------------------------------------------------------------------------
 // Suite setup
 // ---------------------------------------------------------------------------
@@ -329,5 +334,158 @@ describe("E2E: Full pipeline round-trip", () => {
       recallResult.memoryBrief.includes("CarrierRepository"),
       "recalled brief should contain distilled knowledge"
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E 7: Batch operations (Phase E)
+// ---------------------------------------------------------------------------
+
+describe("E2E: Batch operations", () => {
+  it("batch/recall returns results for multiple agents", async () => {
+    // Setup: commit data for two agents
+    await post("/commit", { agentId: "e2e-batch-a", facts: ["batch-a fact"] });
+    await post("/commit", { agentId: "e2e-batch-b", facts: ["batch-b fact"] });
+
+    const { status, body } = await post("/batch/recall", {
+      requests: [
+        { agentId: "e2e-batch-a", depth: "l0" },
+        { agentId: "e2e-batch-b", depth: "l0" },
+      ],
+    });
+    assert.equal(status, 200);
+    assert.equal(body.results.length, 2);
+    assert.ok(body.results.every((r) => r.ok));
+  });
+
+  it("batch/commit stores data for multiple agents", async () => {
+    const { status, body } = await post("/batch/commit", {
+      commits: [
+        { agentId: "e2e-batchc-1", projectId: "e2e-bp", facts: ["c1-fact"] },
+        { agentId: "e2e-batchc-2", projectId: "e2e-bp", facts: ["c2-fact"] },
+      ],
+    });
+    assert.equal(status, 200);
+    assert.equal(body.results.length, 2);
+    assert.ok(body.results.every((r) => r.ok));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E 8: Federation (Phase F)
+// ---------------------------------------------------------------------------
+
+describe("E2E: Federation", () => {
+  it("exports, imports, and revokes across projects", async () => {
+    // Export
+    const { body: exp } = await post("/federation/export", {
+      sourceProject: "e2e-proj-alpha",
+      targetProject: "e2e-proj-beta",
+      agentId: "e2e-fed-agent",
+      entries: [{ type: "fact", content: "alpha uses PostgreSQL" }],
+    });
+    assert.equal(exp.exported, 1);
+
+    // Import
+    const { body: imp } = await get(
+      "/federation/import?projectId=e2e-proj-beta",
+    );
+    assert.equal(imp.count, 1);
+    assert.ok(imp.entries[0].content.includes("PostgreSQL"));
+
+    // Revoke
+    const entryId = imp.entries[0].id;
+    const { body: rev } = await post("/federation/revoke", {
+      projectId: "e2e-proj-beta",
+      entryId,
+    });
+    assert.ok(rev.ok);
+
+    // Verify revoked
+    const { body: imp2 } = await get(
+      "/federation/import?projectId=e2e-proj-beta",
+    );
+    assert.equal(imp2.count, 0);
+  });
+
+  it("dependency graph tracks exports", async () => {
+    const { body } = await get("/federation/dependencies");
+    assert.ok(body.projects.includes("e2e-proj-alpha"));
+    assert.ok(body.dependencies.length >= 1);
+  });
+
+  it("adaptive budget returns correct depth", async () => {
+    const { body: low } = await post("/federation/recommend-budget", {
+      toolCount: 1,
+      turnCount: 2,
+    });
+    assert.equal(low.depth, "l0");
+
+    const { body: high } = await post("/federation/recommend-budget", {
+      toolCount: 10,
+      turnCount: 20,
+      queryLength: 200,
+      mentionCount: 8,
+    });
+    assert.equal(high.depth, "l2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E 9: Approval workflow (Phase F)
+// ---------------------------------------------------------------------------
+
+describe("E2E: Approval workflow", () => {
+  it("submit → list pending → approve", async () => {
+    const { body: sub } = await post("/federation/approval/submit", {
+      sourceAgent: "e2e-approver",
+      projectId: "e2e-appr-proj",
+      type: "decision",
+      content: "migrate to gRPC",
+    });
+    assert.ok(sub.id.startsWith("appr-"));
+
+    const { body: pending } = await get("/federation/approval/pending?projectId=e2e-appr-proj");
+    assert.equal(pending.count, 1);
+
+    const { body: review } = await post("/federation/approval/review", {
+      entryId: sub.id,
+      decision: "approved",
+      reviewedBy: "human-reviewer",
+    });
+    assert.ok(review.ok);
+
+    const { body: after } = await get("/federation/approval/pending?projectId=e2e-appr-proj");
+    assert.equal(after.count, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E 10: Lifecycle GC (Phase D)
+// ---------------------------------------------------------------------------
+
+describe("E2E: Lifecycle GC", () => {
+  it("POST /lifecycle/gc runs without error", async () => {
+    const { status, body } = await post("/lifecycle/gc", {});
+    assert.equal(status, 200);
+    assert.ok(body.ok);
+    assert.ok(typeof body.sharedRetracted === "number");
+    assert.ok(typeof body.draftsRemoved === "number");
+    assert.ok(Array.isArray(body.memoriesCompacted));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E 11: Learning curve (Phase C)
+// ---------------------------------------------------------------------------
+
+describe("E2E: Learning curve", () => {
+  it("GET /inspect/learning-curve returns curve data", async () => {
+    const { status, body } = await get(
+      "/inspect/learning-curve?agentId=e2e-pipeline&days=30",
+    );
+    assert.equal(status, 200);
+    assert.ok(body.ok);
+    assert.ok(Array.isArray(body.curve));
   });
 });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { writeJsonl, readJsonl, ensureDir } from "../src/utils/jsonl.js";
+import { writeJsonl, readJsonl } from "../src/utils/jsonl.js";
 import {
   computeDecayScore,
   compactMemoryFile,
@@ -78,9 +78,9 @@ describe("compactMemoryFile()", () => {
 
     const result = await compactMemoryFile(path);
     assert.ok(result !== null);
-    assert.equal(result!.before, 1050);
-    assert.ok(result!.after <= 750);
-    assert.ok(result!.removed > 0);
+    assert.equal(result.before, 1050);
+    assert.ok(result.after <= 750);
+    assert.ok(result.removed > 0);
 
     const remaining = await readJsonl<MemoryEntry>(path);
     assert.ok(remaining.length <= 750);

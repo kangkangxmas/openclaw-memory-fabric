@@ -24,6 +24,9 @@ export default defineConfig({
       "/patterns": "http://127.0.0.1:7811",
       "/skills": "http://127.0.0.1:7811",
       "/report": "http://127.0.0.1:7811",
+      "/federation": "http://127.0.0.1:7811",
+      "/lifecycle": "http://127.0.0.1:7811",
+      "/batch": "http://127.0.0.1:7811",
     },
   },
 });

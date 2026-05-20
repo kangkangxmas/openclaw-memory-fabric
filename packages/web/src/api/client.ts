@@ -15,6 +15,9 @@ import type {
   SkillDraft,
   ReportEntry,
   LearningCurvePoint,
+  FederationEntry,
+  DependencyGraph,
+  ApprovalEntry,
 } from "../types";
 
 const BASE = "";
@@ -86,4 +89,20 @@ export const api = {
 
   postGraphExplain: (req: GraphExplainRequest) =>
     post<{ explanation: string }>("/graph/explain", req),
+
+  // Federation
+  getFederationImport: (projectId: string) =>
+    get<{ project: string; count: number; entries: FederationEntry[] }>(
+      `/federation/import?projectId=${encodeURIComponent(projectId)}`,
+    ),
+
+  getDependencyGraph: () => get<DependencyGraph>("/federation/dependencies"),
+
+  getPendingApprovals: (projectId?: string) =>
+    get<{ ok: boolean; count: number; entries: ApprovalEntry[] }>(
+      `/federation/approval/pending${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+
+  reviewApproval: (entryId: string, decision: "approved" | "rejected", reviewedBy: string) =>
+    post<{ ok: boolean }>("/federation/approval/review", { entryId, decision, reviewedBy }),
 };

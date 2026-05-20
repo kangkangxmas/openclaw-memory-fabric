@@ -155,9 +155,47 @@ export interface LearningCurvePoint {
   patterns: number;
 }
 
+export interface FederationEntry {
+  id: string;
+  sourceProject: string;
+  targetProject: string;
+  type: string;
+  content: string;
+  exportedBy: string;
+  exportedAt: string;
+  status: "active" | "revoked";
+}
+
+export interface ProjectDependency {
+  from: string;
+  to: string;
+  sharedEntities: string[];
+  strength: number;
+  lastUpdated: string;
+}
+
+export interface DependencyGraph {
+  projects: string[];
+  dependencies: ProjectDependency[];
+  generatedAt: string;
+}
+
+export interface ApprovalEntry {
+  id: string;
+  sourceAgent: string;
+  projectId: string;
+  content: string;
+  type: string;
+  status: "pending" | "approved" | "rejected";
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+}
+
 export type Page =
   | "overview"
   | "memory"
   | "graph"
   | "carriers"
-  | "learning";
+  | "learning"
+  | "federation";

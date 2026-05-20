@@ -11,7 +11,8 @@ export default tseslint.config(
       "**/dist-test/**",
       "**/*.js",          // only lint TypeScript source
       "scripts/**",       // shell scripts / plain mjs — not TS
-      "examples/**"
+      "examples/**",
+      "packages/web/**"   // separate tsconfig — linted by its own config
     ]
   },
 

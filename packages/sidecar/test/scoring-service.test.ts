@@ -62,8 +62,8 @@ describe("ScoringService.generateReport()", () => {
 
     const dev = reports.find((r) => r.taskType === "development");
     assert.ok(dev);
-    assert.equal(dev!.totalEntries, 2);
-    assert.equal(dev!.avgScore, 85);
+    assert.equal(dev.totalEntries, 2);
+    assert.equal(dev.avgScore, 85);
   });
 
   it("detects upward trend", () => {

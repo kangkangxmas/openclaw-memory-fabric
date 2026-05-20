@@ -1,7 +1,7 @@
 {
   "id": "memory-fabric",
   "name": "OpenClaw Memory Fabric",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Multi-agent memory orchestration plugin for OpenClaw. Provides memory isolation, cross-session persistence, long-term knowledge carriers, and structural cognition via Graphify.",
   "entry": "dist/index.js",
   "configSchema": {

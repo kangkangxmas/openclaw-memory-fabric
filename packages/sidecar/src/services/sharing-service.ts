@@ -58,7 +58,7 @@ export class SharingService {
   /**
    * Push a high-confidence pattern to agents with similar tool profiles.
    */
-  async sharePattern(pattern: Pattern, allAgentIds: string[]): Promise<SharingResult> {
+  async sharePattern(pattern: Pattern, _allAgentIds: string[]): Promise<SharingResult> {
     if (pattern.confidence < this.minConfidence) {
       return { shared: false, reason: "confidence_too_low" };
     }
@@ -70,7 +70,7 @@ export class SharingService {
 
     // Scan all agent directories
     const agentsDir = join(this.openvikingBasePath, "org", "default", "agents");
-    let agentIds: string[] = [];
+    let agentIds: string[];
     try {
       agentIds = await readdir(agentsDir);
     } catch {

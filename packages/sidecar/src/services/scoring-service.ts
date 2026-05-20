@@ -148,11 +148,11 @@ export class ScoringService {
           .replace(/^```(?:json)?\s*/i, "")
           .replace(/\s*```$/i, "");
         try {
-          const parsed = JSON.parse(cleaned);
+          const parsed = JSON.parse(cleaned) as { score?: unknown; rationale?: unknown };
           if (typeof parsed.score === "number") {
             return {
               selfScore: Math.max(0, Math.min(100, Math.round(parsed.score))),
-              scoreRationale: String(parsed.rationale ?? "LLM scored")
+              scoreRationale: typeof parsed.rationale === "string" ? parsed.rationale : "LLM scored"
             };
           }
         } catch {

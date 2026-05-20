@@ -2,6 +2,45 @@
 
 All notable changes to this project are documented here.
 
+## 1.7.0 - 2026-05-20
+
+### Phase B: Inspector Web UI 重构
+- 新增 `packages/web` 前端包 — React 18 + Vite + TypeScript + Tailwind CSS
+- 5 个页面: 总览、记忆浏览、知识图谱 (react-force-graph-2d)、载体文件 (react-markdown)、自学习仪表板
+- Sidecar 改用 `@fastify/static` 提供 SPA 静态文件，删除 808 行嵌入式 HTML
+
+### Phase C: 自学习闭环增强
+- 3 维度评分 (goal/tool/knowledge) 替代单一启发式 scoring
+- self-model confidence 自动演进 (low→medium→high)
+- 经验去重: Jaccard 相似度 (≥0.7) + 500 条上限自动压缩
+- 学习曲线: `/inspect/learning-curve` API + SVG 折线图可视化
+
+### Phase D: 记忆生命周期管理
+- `lifecycle-service.ts`: 衰减评分 (指数衰减 + 类型加权) 整合进 recall 排序
+- 容量控制: `compactMemoryFile()` 超 1000 条自动压缩到 750 条
+- `summary.json` 乐观锁版本控制 (冲突检测 + 自动重试)
+- `POST /lifecycle/gc` 垃圾回收端点 (清理 shared entries + skill drafts)
+
+### Phase E: 性能与扩展
+- OpenVikingService 60s TTL 内存索引缓存
+- EmbeddingService 512 条 LRU 嵌入缓存
+- `GraphifyService.incrementalUpdate()` 增量图谱更新
+- `POST /batch/recall` + `POST /batch/commit` 批量操作 (最多 10 并发)
+
+### Phase F: 多工作空间联邦
+- `federation-service.ts`: 跨项目知识导出/导入/撤回
+- 多项目依赖图谱 (自动追踪 + `GET /federation/dependencies`)
+- 自适应记忆预算 (`POST /federation/recommend-budget`)
+- 共享记忆审批流 (submit → pending → approved/rejected)
+
+### 其他
+- 自学习质量提升: 知识评分过滤 + self-model 主动合并 + 图谱自举
+- 模式检测频率从每 10 次提升到每 5 次
+- 技能生成置信度门槛从 5 降到 3
+- 测试: 40 plugin + 107 sidecar = **147 总测试**
+
+---
+
 ## 1.6.0 - 2026-04-16
 
 ### Requirements Gap Closure (PRD/Architecture alignment)

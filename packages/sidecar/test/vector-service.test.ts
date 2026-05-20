@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { VectorService } from "../src/services/vector-service.js";
 import { VectorStore } from "../src/stores/vector-store.js";
+import type { EmbeddingService } from "../src/services/embedding-service.js";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -11,16 +12,16 @@ function makeTempDir(): string {
 }
 
 // Mock embedder that returns deterministic vectors
-class MockEmbedder {
+class MockEmbedder implements Pick<EmbeddingService, "embed"> {
   async embed(text: string): Promise<number[] | null> {
     // Simple hash-based vector for determinism
-    const vec = new Array(4).fill(0);
+    const vec: number[] = new Array(4).fill(0) as number[];
     for (let i = 0; i < text.length; i++) {
       vec[i % 4] += text.charCodeAt(i);
     }
     // Normalize
-    const norm = Math.sqrt(vec.reduce((a, b) => a + b * b, 0));
-    return vec.map((v) => v / (norm || 1));
+    const norm = Math.sqrt(vec.reduce((a: number, b: number) => a + b * b, 0));
+    return vec.map((v: number) => v / (norm || 1));
   }
 }
 
@@ -29,7 +30,7 @@ describe("VectorService.semanticQuery()", () => {
     const dir = makeTempDir();
     const store = new VectorStore(dir);
     await store.load();
-    const svc = new VectorService(store, new MockEmbedder() as any);
+    const svc = new VectorService(store, new MockEmbedder() as unknown as EmbeddingService);
 
     const results = await svc.semanticQuery("test");
     assert.equal(results.length, 0);
@@ -41,7 +42,7 @@ describe("VectorService.semanticQuery()", () => {
     const dir = makeTempDir();
     const store = new VectorStore(dir);
     await store.load();
-    const svc = new VectorService(store, new MockEmbedder() as any);
+    const svc = new VectorService(store, new MockEmbedder() as unknown as EmbeddingService);
 
     await svc.index("id-1", "agent-a", "hello world");
     await svc.index("id-2", "agent-a", "hello there");
@@ -62,7 +63,7 @@ describe("VectorService.hybridQuery()", () => {
     const dir = makeTempDir();
     const store = new VectorStore(dir);
     await store.load();
-    const svc = new VectorService(store, new MockEmbedder() as any);
+    const svc = new VectorService(store, new MockEmbedder() as unknown as EmbeddingService);
 
     await svc.index("id-1", "agent-a", "test content");
     await svc.index("id-2", "agent-a", "other stuff");
