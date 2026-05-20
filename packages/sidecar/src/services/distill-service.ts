@@ -394,8 +394,57 @@ export class DistillService {
     const cleanPatterns = dedup(patterns).slice(0, 5);
     const cleanUnresolved = dedup(unresolved).slice(0, 5);
 
-    // High-value items bubble up as publish candidates (decisions + unresolved)
-    const publishCandidates = [...cleanDecisions.slice(0, 2), ...cleanUnresolved.slice(0, 2)];
+    // ---------------------------------------------------------------------------
+// Quality scoring for promote candidates
+// ---------------------------------------------------------------------------
+
+function scoreFactQuality(fact: string): number {
+  let score = 0;
+  // Length: not too short, not too long
+  if (fact.length >= 15 && fact.length <= 150) score += 2;
+  else if (fact.length >= 10) score += 1;
+  // Contains specific technical terms
+  if (/\b(Service|Client|Handler|Manager|Controller|Adapter|Repository|Model|Store|API|DB|Config|Plugin|Module)\b/.test(fact)) score += 2;
+  // Contains action verbs
+  if (/\b(use|using|adopt|switch|migrate|replace|update|fix|add|remove|configure|deploy)\b/i.test(fact)) score += 1;
+  // Contains Chinese technical terms
+  if (/[\u4e00-\u9fa5]/.test(fact) && /[\u4e00-\u9fa5]{2,}/.test(fact)) score += 1;
+  // Not generic boilerplate
+  if (/^(the|a|an|this|that|it|there)\s/i.test(fact)) score -= 1;
+  if (/system|application|software/i.test(fact) && !/\b[A-Z][a-zA-Z]+\b/.test(fact)) score -= 1;
+  return Math.max(0, score);
+}
+
+function scorePatternQuality(pattern: string): number {
+  let score = 0;
+  if (pattern.length >= 20 && pattern.length <= 150) score += 2;
+  // Contains conditional markers
+  if (/\b(when|if|always|never|should|must|avoid|prefer)\b/i.test(pattern)) score += 2;
+  if (/\b(每次|当|如果|总是|从不|应该|必须|避免|优先)\b/.test(pattern)) score += 2;
+  // Contains specific actions
+  if (/\b(use|call|invoke|pass|return|set|get|check|validate)\b/i.test(pattern)) score += 1;
+  return Math.max(0, score);
+}
+
+// High-value items bubble up as publish candidates (decisions + unresolved + quality facts/patterns)
+    const scoredFacts = cleanFacts
+      .map((f) => ({ fact: f, score: scoreFactQuality(f) }))
+      .filter((item) => item.score >= 3)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.fact);
+    
+    const scoredPatterns = cleanPatterns
+      .map((p) => ({ pattern: p, score: scorePatternQuality(p) }))
+      .filter((item) => item.score >= 3)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.pattern);
+
+    const publishCandidates = [
+      ...cleanDecisions.slice(0, 2), 
+      ...cleanUnresolved.slice(0, 2),
+      ...scoredFacts.slice(0, 2),
+      ...scoredPatterns.slice(0, 1)
+    ];
 
     return {
       facts: cleanFacts,

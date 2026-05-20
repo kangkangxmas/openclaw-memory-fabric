@@ -343,8 +343,7 @@ export class ExperienceService {
 
   /**
    * Check if self-model.md is stale (>24h since last update).
-   * If stale, update the "Updated At" timestamp.
-   * Future: also merge new patterns into the "Understood" section.
+   * If stale, update the "Updated At" timestamp and merge new learnings.
    */
   private async refreshCarrierIfStale(ctx: PostCommitContext): Promise<void> {
     // Only proceed if we have actual patterns/lessons to work with
@@ -359,12 +358,13 @@ export class ExperienceService {
     if (!selfModel) return;
 
     const lastUpdate = extractCarrierTimestamp(selfModel.content);
-    if (lastUpdate !== null && Date.now() - lastUpdate < CARRIER_STALE_MS) {
-      return; // still fresh
+    const isStale = lastUpdate === null || Date.now() - lastUpdate >= CARRIER_STALE_MS;
+    
+    // Always merge learnings; update timestamp if stale
+    let newContent = this.mergeLearningsIntoSelfModel(selfModel.content, ctx);
+    if (isStale) {
+      newContent = setCarrierTimestamp(newContent, new Date().toISOString());
     }
-
-    // Update timestamp
-    const newContent = setCarrierTimestamp(selfModel.content, new Date().toISOString());
 
     await this.carriers.merge({
       agentId: ctx.agentId,
@@ -376,5 +376,191 @@ export class ExperienceService {
         }
       ]
     });
+  }
+
+  /**
+   * Merge new patterns/lessons/decisions into the self-model.md content.
+   * Adds items to "Understood" section if they represent confirmed knowledge.
+   */
+  private mergeLearningsIntoSelfModel(
+    content: string,
+    ctx: PostCommitContext
+  ): string {
+    const learnings: string[] = [];
+    
+    // Add patterns as understood principles
+    if (ctx.patterns) {
+      for (const p of ctx.patterns.slice(0, 3)) {
+        if (p.length >= 10 && !content.includes(p)) {
+          learnings.push(`- ${p}`);
+        }
+      }
+    }
+    
+    // Add lessons as understood pitfalls/practices
+    if (ctx.lessons) {
+      for (const l of ctx.lessons.slice(0, 2)) {
+        if (l.length >= 10 && !content.includes(l)) {
+          learnings.push(`- ${l}`);
+        }
+      }
+    }
+    
+    // Add decisions as understood choices
+    if (ctx.decisions) {
+      for (const d of ctx.decisions.slice(0, 2)) {
+        const normalized = d.trim();
+        if (normalized.length >= 10 && !content.includes(normalized)) {
+          learnings.push(`- 已决策: ${normalized}`);
+        }
+      }
+    }
+
+    if (learnings.length === 0) return content;
+
+    // Try to append under "## Understood" section
+    const understoodMatch = content.match(/(##\s*Understood\s*\n)([\s\S]*?)(?=\n##\s|$)/);
+    if (understoodMatch) {
+      const existingBlock = understoodMatch[2];
+      const newBlock = existingBlock.trimEnd() + "\n" + learnings.join("\n") + "\n";
+      return content.replace(understoodMatch[0], `## Understood\n${newBlock}`);
+    }
+
+    // If no Understood section, append before Updated At or at end
+    const updatedAtMatch = content.match(/\n##\s*Updated\s*At\s*\n/);
+    if (updatedAtMatch) {
+      const insertPos = content.indexOf(updatedAtMatch[0]);
+      return (
+        content.slice(0, insertPos) +
+        "\n## Understood\n" +
+        learnings.join("\n") +
+        "\n\n" +
+        content.slice(insertPos)
+      );
+    }
+
+    return content.trimEnd() + "\n\n## Understood\n" + learnings.join("\n") + "\n";
+  }
+
+  // -------------------------------------------------------------------------
+  // Public: Daily Self-Check — force self-model update with explicit content
+  // -------------------------------------------------------------------------
+
+  /**
+   * Force-update an agent's self-model.md with explicit content.
+   * Used by daily self-check tasks to ensure self-model stays current
+   * even when agents haven't had tool-rich sessions.
+   */
+  async forceSelfModelUpdate(params: {
+    agentId: string;
+    projectId?: string;
+    currentGoal?: string;
+    understood?: string[];
+    uncertain?: string[];
+    missingEvidence?: string[];
+    preferredNextActions?: string[];
+    confidence?: "low" | "medium" | "high";
+  }): Promise<boolean> {
+    try {
+      const [selfModel] = await this.carriers.read({
+        agentId: params.agentId,
+        projectId: params.projectId,
+        files: ["self-model.md"]
+      });
+
+      const now = new Date().toISOString();
+      let content = selfModel?.content ?? this.buildEmptySelfModel();
+
+      // Update each section
+      if (params.currentGoal) {
+        content = this.updateSection(content, "Current Goal", params.currentGoal);
+      }
+      if (params.understood?.length) {
+        content = this.appendToSection(content, "Understood", params.understood);
+      }
+      if (params.uncertain?.length) {
+        content = this.updateSection(content, "Uncertain", params.uncertain.join("\n- "));
+      }
+      if (params.missingEvidence?.length) {
+        content = this.updateSection(content, "Missing Evidence", params.missingEvidence.join("\n- "));
+      }
+      if (params.preferredNextActions?.length) {
+        content = this.updateSection(content, "Preferred Next Actions", params.preferredNextActions.join("\n- "));
+      }
+      if (params.confidence) {
+        content = this.updateSection(content, "Confidence", params.confidence);
+      }
+
+      content = setCarrierTimestamp(content, now);
+
+      await this.carriers.merge({
+        agentId: params.agentId,
+        projectId: params.projectId,
+        patches: [{ filename: "self-model.md", content }]
+      });
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private buildEmptySelfModel(): string {
+    return `# Self Model
+
+## Current Goal
+<!-- What is the agent currently trying to accomplish? -->
+
+## Understood
+<!-- What has the agent confidently understood? -->
+
+## Uncertain
+<!-- What is the agent unsure about? -->
+
+## Missing Evidence
+<!-- What information is still needed? -->
+
+## Preferred Next Actions
+<!-- What should the agent do next? -->
+
+## Confidence
+<!-- low | medium | high -->
+
+## Updated At
+<!-- ${new Date().toISOString()} -->
+`;
+  }
+
+  private updateSection(content: string, heading: string, value: string): string {
+    const regex = new RegExp(`(##\\s*${heading}\\s*\\n)([\\s\\S]*?)(?=\\n##\\s|$)`);
+    const match = content.match(regex);
+    if (match) {
+      return content.replace(match[0], `## ${heading}\n${value}\n`);
+    }
+    // Section doesn't exist — append before Updated At
+    const updatedAtMatch = content.match(/\n##\s*Updated\s*At\s*\n/);
+    if (updatedAtMatch) {
+      const insertPos = content.indexOf(updatedAtMatch[0]);
+      return (
+        content.slice(0, insertPos) +
+        `\n## ${heading}\n${value}\n\n` +
+        content.slice(insertPos)
+      );
+    }
+    return content.trimEnd() + `\n\n## ${heading}\n${value}\n`;
+  }
+
+  private appendToSection(content: string, heading: string, items: string[]): string {
+    const regex = new RegExp(`(##\\s*${heading}\\s*\\n)([\\s\\S]*?)(?=\\n##\\s|$)`);
+    const match = content.match(regex);
+    if (match) {
+      const existing = match[2].trim();
+      const newItems = items.filter((item) => !existing.includes(item));
+      if (newItems.length === 0) return content;
+      const prefix = existing ? existing + "\n" : "";
+      const newBlock = prefix + newItems.map((i) => `- ${i}`).join("\n") + "\n";
+      return content.replace(match[0], `## ${heading}\n${newBlock}`);
+    }
+    return this.updateSection(content, heading, items.map((i) => `- ${i}`).join("\n"));
   }
 }

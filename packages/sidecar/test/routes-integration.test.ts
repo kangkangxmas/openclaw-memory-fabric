@@ -321,7 +321,7 @@ describe("Inspector routes", () => {
     assert.equal(res.statusCode, 200);
     assert.ok(res.headers["content-type"]?.includes("text/html"));
     assert.ok(res.body.includes("Memory Fabric"));
-    assert.ok(res.body.includes("Load Full Snapshot"));
+    assert.ok(res.body.includes("加载完整快照"));
   });
 
   it("returns raw memory entries for an agent/project", async () => {

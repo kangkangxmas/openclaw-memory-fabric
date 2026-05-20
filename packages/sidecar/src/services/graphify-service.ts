@@ -506,7 +506,16 @@ export class GraphifyService {
 
     const graphPath = this.graphJsonPath(projectId);
     if (!existsSync(graphPath)) {
-      return { triggered: false, reason: "no existing graph" };
+      // No graph yet — bootstrap from scratch instead of refusing
+      this.refreshInProgress.add(projectId);
+      this.bootstrapProjectGraph({ projectId, paths })
+        .then(() => {
+          this.refreshInProgress.delete(projectId);
+        })
+        .catch(() => {
+          this.refreshInProgress.delete(projectId);
+        });
+      return { triggered: true, reason: "no existing graph — bootstrapping" };
     }
 
     try {

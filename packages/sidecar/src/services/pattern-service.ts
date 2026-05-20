@@ -40,7 +40,7 @@ interface Cluster {
 // Constants
 // ---------------------------------------------------------------------------
 
-const MIN_FREQUENCY = 3;
+const MIN_FREQUENCY = 2;
 const MIN_SUCCESS_RATE = 0.8;
 const DEFAULT_DAYS = 30;
 

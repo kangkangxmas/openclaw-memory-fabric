@@ -323,8 +323,11 @@ export class OpenVikingService {
       projectId
     });
 
-    // Items tagged as unresolved bubble up as publish candidates for human review
-    const publishCandidates = unresolved.slice(0, 3).map((u) => u.slice(0, 80));
+    // Items tagged as unresolved + decisions bubble up as publish candidates for human review
+    const publishCandidates = [
+      ...decisions.slice(0, 2).map((d) => d.slice(0, 80)),
+      ...unresolved.slice(0, 2).map((u) => u.slice(0, 80))
+    ];
 
     return {
       committed: toWrite.length,
