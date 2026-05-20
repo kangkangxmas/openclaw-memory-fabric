@@ -9,7 +9,8 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm -C packages/web build && cp -r packages/web/dist/ packages/sidecar/public/ && pnpm -C packages/plugin build && pnpm -C packages/sidecar build",
+    "build:web": "pnpm -C packages/web build && cp -r packages/web/dist/ packages/sidecar/public/",
     "clean": "pnpm -r exec rm -rf dist dist-test tsconfig.tsbuildinfo tsconfig.test.tsbuildinfo",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

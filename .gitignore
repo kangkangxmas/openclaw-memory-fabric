@@ -7,4 +7,5 @@ coverage
 .env
 .env.*
 runtime-data
+packages/sidecar/public
 .claude/
