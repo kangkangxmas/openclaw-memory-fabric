@@ -17,8 +17,17 @@ const NAV_ITEMS: { page: Page; label: string }[] = [
   { page: "federation", label: "联邦" },
 ];
 
-const SCOPES: Scope[] = ["project", "private", "shared", "auto"];
-const DEPTHS: Depth[] = ["l0", "l1", "l2"];
+const SCOPES: { value: Scope; label: string }[] = [
+  { value: "project", label: "项目级" },
+  { value: "private", label: "私有" },
+  { value: "shared", label: "共享" },
+  { value: "auto", label: "自动" },
+];
+const DEPTHS: { value: Depth; label: string }[] = [
+  { value: "l0", label: "L0 浅层 (600)" },
+  { value: "l1", label: "L1 中层 (1800)" },
+  { value: "l2", label: "L2 深层 (5000)" },
+];
 
 export function Sidebar({ ctx, onUpdate, currentPage, onNavigate }: SidebarProps) {
   return (
@@ -47,14 +56,14 @@ export function Sidebar({ ctx, onUpdate, currentPage, onNavigate }: SidebarProps
         </h3>
 
         <label className="block">
-          <span className="text-xs text-muted">Agent</span>
+          <span className="text-xs text-muted">智能体</span>
           <select
             value={ctx.agentId}
             onChange={(e) => onUpdate({ agentId: e.target.value })}
             className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
           >
             {ctx.agents.length === 0 && (
-              <option value="">loading...</option>
+              <option value="">加载中...</option>
             )}
             {ctx.agents.map((a) => (
               <option key={a} value={a}>
@@ -65,7 +74,7 @@ export function Sidebar({ ctx, onUpdate, currentPage, onNavigate }: SidebarProps
         </label>
 
         <label className="block">
-          <span className="text-xs text-muted">Project ID</span>
+          <span className="text-xs text-muted">项目标识</span>
           <input
             type="text"
             value={ctx.projectId}
@@ -75,30 +84,30 @@ export function Sidebar({ ctx, onUpdate, currentPage, onNavigate }: SidebarProps
         </label>
 
         <label className="block">
-          <span className="text-xs text-muted">Scope</span>
+          <span className="text-xs text-muted">记忆作用域</span>
           <select
             value={ctx.scope}
             onChange={(e) => onUpdate({ scope: e.target.value as Scope })}
             className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
           >
             {SCOPES.map((s) => (
-              <option key={s} value={s}>
-                {s}
+              <option key={s.value} value={s.value}>
+                {s.label}
               </option>
             ))}
           </select>
         </label>
 
         <label className="block">
-          <span className="text-xs text-muted">Recall Depth</span>
+          <span className="text-xs text-muted">召回深度</span>
           <select
             value={ctx.depth}
             onChange={(e) => onUpdate({ depth: e.target.value as Depth })}
             className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
           >
             {DEPTHS.map((d) => (
-              <option key={d} value={d}>
-                {d}
+              <option key={d.value} value={d.value}>
+                {d.label}
               </option>
             ))}
           </select>
