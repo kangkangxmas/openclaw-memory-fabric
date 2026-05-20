@@ -147,6 +147,14 @@ export interface GraphExplainRequest {
 export type Scope = "private" | "project" | "shared" | "auto";
 export type Depth = "l0" | "l1" | "l2";
 
+export interface LearningCurvePoint {
+  date: string;
+  experiences: number;
+  avgScore: number | null;
+  successRate: number;
+  patterns: number;
+}
+
 export type Page =
   | "overview"
   | "memory"

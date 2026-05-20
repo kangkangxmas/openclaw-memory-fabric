@@ -9,7 +9,7 @@
  */
 
 import { join } from "path";
-import { readJsonl, appendJsonl, ensureDir } from "../utils/jsonl.js";
+import { readJsonl, appendJsonl, writeJsonl, ensureDir } from "../utils/jsonl.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,6 +59,10 @@ export interface ExperienceQuery {
 // ---------------------------------------------------------------------------
 
 const EXPERIENCES_FILENAME = "experiences.jsonl";
+/** Maximum entries before auto-compact triggers */
+const MAX_ENTRIES = 500;
+/** Similarity threshold for deduplication (Jaccard on outcome words) */
+const DEDUP_SIMILARITY = 0.7;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -94,6 +98,33 @@ function queryUnsafe(
 
   const maxResults = limit ?? 100;
   return filtered.slice(0, maxResults);
+}
+
+// ---------------------------------------------------------------------------
+// Deduplication helpers
+// ---------------------------------------------------------------------------
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, " ").split(/\s+/).filter((t) => t.length > 1)
+  );
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  let intersection = 0;
+  for (const t of a) {
+    if (b.has(t)) intersection++;
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function isSimilar(a: string, b: string): boolean {
+  return jaccardSimilarity(tokenize(a), tokenize(b)) >= DEDUP_SIMILARITY;
+}
+
+function dedup(arr: string[]): string[] {
+  return [...new Set(arr)];
 }
 
 // ---------------------------------------------------------------------------
@@ -150,5 +181,67 @@ export class ExperienceStore {
   async totalCount(agentId: string): Promise<number> {
     const filePath = storePath(this.openvikingBasePath, agentId);
     return (await readJsonl<unknown>(filePath)).length;
+  }
+
+  /**
+   * Compact experience entries for an agent:
+   * - Deduplicate similar entries (same taskType, similar outcome)
+   * - Keep the higher-scored entry when merging duplicates
+   * - Trim oldest low-score entries if over MAX_ENTRIES
+   *
+   * Returns the number of entries removed.
+   */
+  async compact(agentId: string): Promise<{ removed: number; remaining: number }> {
+    const filePath = storePath(this.openvikingBasePath, agentId);
+    const entries = await readJsonl<ExperienceEntry>(filePath);
+    if (entries.length === 0) return { removed: 0, remaining: 0 };
+
+    // 1. Deduplicate: group by taskType, merge similar outcomes
+    const deduped: ExperienceEntry[] = [];
+    const seen = new Map<string, ExperienceEntry>();
+
+    for (const entry of entries) {
+      const key = entry.taskType;
+      const existing = seen.get(key);
+
+      if (existing && isSimilar(existing.outcome, entry.outcome)) {
+        // Keep the one with higher score (or newer if scores equal)
+        const existingScore = existing.selfScore ?? 0;
+        const newScore = entry.selfScore ?? 0;
+        if (newScore > existingScore || (newScore === existingScore && entry.timestamp > existing.timestamp)) {
+          // Replace: merge lessons/patterns from both
+          const merged: ExperienceEntry = {
+            ...entry,
+            patterns: dedup([...existing.patterns, ...entry.patterns]).slice(0, 5),
+            lessons: dedup([...existing.lessons, ...entry.lessons]).slice(0, 3),
+          };
+          seen.set(key, merged);
+          // Update in deduped array
+          const idx = deduped.indexOf(existing);
+          if (idx >= 0) deduped[idx] = merged;
+        }
+        // Otherwise keep existing, skip new
+      } else {
+        seen.set(key, entry);
+        deduped.push(entry);
+      }
+    }
+
+    // 2. Trim if still over limit: remove lowest-score oldest entries
+    let final = deduped;
+    if (final.length > MAX_ENTRIES) {
+      // Sort by score desc, then by timestamp desc
+      final.sort((a, b) => {
+        const scoreDiff = (b.selfScore ?? 0) - (a.selfScore ?? 0);
+        return scoreDiff !== 0 ? scoreDiff : b.timestamp - a.timestamp;
+      });
+      final = final.slice(0, MAX_ENTRIES);
+    }
+
+    // 3. Restore chronological order and write back
+    final.sort((a, b) => a.timestamp - b.timestamp);
+    await writeJsonl(filePath, final);
+
+    return { removed: entries.length - final.length, remaining: final.length };
   }
 }

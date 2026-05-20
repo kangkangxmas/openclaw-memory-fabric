@@ -14,6 +14,7 @@ import type {
   PatternEntry,
   SkillDraft,
   ReportEntry,
+  LearningCurvePoint,
 } from "../types";
 
 const BASE = "";
@@ -70,6 +71,11 @@ export const api = {
   getReport: (agentId: string, days = 30) =>
     get<{ ok: boolean; agentId: string; totalEntries: number; reports: ReportEntry[] }>(
       `/report?agentId=${encodeURIComponent(agentId)}&days=${days}`,
+    ),
+
+  getLearningCurve: (agentId: string, days = 30) =>
+    get<{ ok: boolean; agentId: string; days: number; curve: LearningCurvePoint[] }>(
+      `/inspect/learning-curve?agentId=${encodeURIComponent(agentId)}&days=${days}`,
     ),
 
   postGraphQuery: (req: GraphQueryRequest) =>

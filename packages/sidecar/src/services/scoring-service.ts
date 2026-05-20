@@ -85,31 +85,40 @@ async function callLLM(
   }
 }
 
-function heuristicScore(
-  success: boolean,
-  toolCount: number,
-  turnCount: number
-): ScoreResult {
-  // Base score
-  let score = success ? 70 : 40;
+function heuristicScore(params: {
+  success: boolean;
+  toolCount: number;
+  turnCount: number;
+  outcome?: string;
+  patterns?: string[];
+  lessons?: string[];
+}): ScoreResult {
+  const { success, toolCount, turnCount, outcome, patterns, lessons } = params;
 
-  // Penalize excessive tool usage relative to turns
+  // Dimension 1: Goal completion (0-40)
+  let goalScore = success ? 30 : 10;
+  if (outcome && outcome.length > 20) goalScore += 5; // detailed outcome
+  if (patterns && patterns.length > 0) goalScore += 5; // patterns extracted = deeper work
+
+  // Dimension 2: Tool efficiency (0-30)
+  let toolScore = 20;
   const toolRatio = toolCount / Math.max(turnCount, 1);
-  if (toolRatio > 0.8) score -= 10;
-  if (toolRatio < 0.2 && toolCount > 0) score -= 5;
+  if (toolRatio > 0.8) toolScore -= 10; // over-tooling
+  if (toolRatio >= 0.3 && toolRatio <= 0.7) toolScore += 10; // sweet spot
+  if (toolCount === 0) toolScore = 5; // no tools at all
 
-  // Penalize very long sessions (potential inefficiency)
-  if (turnCount > 20) score -= 5;
+  // Dimension 3: Knowledge quality (0-30)
+  let knowledgeScore = 10;
+  if (lessons && lessons.length > 0) knowledgeScore += 10; // learned something
+  if (patterns && patterns.some((p) => p.length >= 20)) knowledgeScore += 5; // substantive pattern
+  if (outcome && /\b(fix|resolve|implement|完成|修复|实现)\b/i.test(outcome)) knowledgeScore += 5;
 
-  // Cap at 100, floor at 0
-  score = Math.max(0, Math.min(100, score));
+  const total = Math.max(0, Math.min(100, goalScore + toolScore + knowledgeScore));
+  const rationale =
+    `goal=${goalScore}/40 tool=${toolScore}/30 knowledge=${knowledgeScore}/30` +
+    ` | success=${success} tools=${toolCount} turns=${turnCount}`;
 
-  return {
-    selfScore: score,
-    scoreRationale: success
-      ? `Heuristic: success=true, tools=${toolCount}, turns=${turnCount}`
-      : `Heuristic: success=false, tools=${toolCount}, turns=${turnCount}`
-  };
+  return { selfScore: total, scoreRationale: rationale };
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +137,7 @@ export class ScoringService {
     turnCount: number;
     outcome?: string;
     patterns?: string[];
+    lessons?: string[];
   }): Promise<ScoreResult> {
     if (this.llmCfg) {
       const prompt = `Outcome: ${params.outcome ?? "N/A"}\nSuccess: ${params.success}\nTools used: ${params.toolCount}\nTurns: ${params.turnCount}\nPatterns: ${(params.patterns ?? []).join(", ") || "None"}`;
@@ -151,7 +161,7 @@ export class ScoringService {
       }
     }
 
-    return heuristicScore(params.success, params.toolCount, params.turnCount);
+    return heuristicScore(params);
   }
 
   /**

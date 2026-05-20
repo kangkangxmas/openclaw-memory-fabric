@@ -19,6 +19,7 @@ export default defineConfig({
       "/inspect/memories": "http://127.0.0.1:7811",
       "/inspect/graph": "http://127.0.0.1:7811",
       "/inspect/experiences": "http://127.0.0.1:7811",
+      "/inspect/learning-curve": "http://127.0.0.1:7811",
       "/health": "http://127.0.0.1:7811",
       "/patterns": "http://127.0.0.1:7811",
       "/skills": "http://127.0.0.1:7811",

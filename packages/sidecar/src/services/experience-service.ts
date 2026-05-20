@@ -55,6 +55,10 @@ const MIN_TURNS = 5;
 const RATE_LIMIT_MS = 5 * 60 * 1000; // 5 minutes
 /** self-model.md stale threshold */
 const CARRIER_STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
+/** Max items per section to prevent self-model bloat */
+const MAX_SECTION_ITEMS = 15;
+/** Confidence evolution: sessions needed to level up */
+const CONFIDENCE_THRESHOLDS = { low: 5, medium: 15, high: 30 } as const;
 
 // ---------------------------------------------------------------------------
 // LLM prompts
@@ -206,10 +210,16 @@ export class ExperienceService {
       // 4. P0-3: Check carrier freshness after storing
       await this.refreshCarrierIfStale(ctx);
 
-      // 5. P1-1: Trigger pattern detection every 10th experience entry
+      // 4.5. C5: Auto-compact if experience file is large
+      const total = await this.store.totalCount(ctx.agentId);
+      if (total > 500) {
+        void this.store.compact(ctx.agentId);
+      }
+
+      // 5. P1-1: Trigger pattern detection every 5th experience entry
       if (this.patterns) {
         const total = await this.store.totalCount(ctx.agentId);
-        if (total > 0 && total % 10 === 0) {
+        if (total > 0 && total % 5 === 0) {
           void this.patterns.detectPatterns(ctx.agentId);
         }
       }
@@ -344,6 +354,7 @@ export class ExperienceService {
   /**
    * Check if self-model.md is stale (>24h since last update).
    * If stale, update the "Updated At" timestamp and merge new learnings.
+   * Also evolves confidence based on cumulative experience count.
    */
   private async refreshCarrierIfStale(ctx: PostCommitContext): Promise<void> {
     // Only proceed if we have actual patterns/lessons to work with
@@ -359,9 +370,23 @@ export class ExperienceService {
 
     const lastUpdate = extractCarrierTimestamp(selfModel.content);
     const isStale = lastUpdate === null || Date.now() - lastUpdate >= CARRIER_STALE_MS;
-    
+
     // Always merge learnings; update timestamp if stale
     let newContent = this.mergeLearningsIntoSelfModel(selfModel.content, ctx);
+
+    // Trim bloated sections
+    newContent = this.trimSection(newContent, "Understood", MAX_SECTION_ITEMS);
+
+    // Auto-evolve confidence based on total experience count
+    const totalExp = await this.store.totalCount(ctx.agentId);
+    const newConfidence =
+      totalExp >= CONFIDENCE_THRESHOLDS.high
+        ? "high"
+        : totalExp >= CONFIDENCE_THRESHOLDS.medium
+          ? "medium"
+          : "low";
+    newContent = this.updateSection(newContent, "Confidence", newConfidence);
+
     if (isStale) {
       newContent = setCarrierTimestamp(newContent, new Date().toISOString());
     }
@@ -548,6 +573,20 @@ export class ExperienceService {
       );
     }
     return content.trimEnd() + `\n\n## ${heading}\n${value}\n`;
+  }
+
+  /** Keep only the last N bullet items in a section to prevent bloat. */
+  private trimSection(content: string, heading: string, maxItems: number): string {
+    const regex = new RegExp(`(##\\s*${heading}\\s*\\n)([\\s\\S]*?)(?=\\n##\\s|$)`);
+    const match = content.match(regex);
+    if (!match) return content;
+
+    const lines = match[2].split("\n").filter((l) => l.startsWith("- "));
+    if (lines.length <= maxItems) return content;
+
+    // Keep the most recent items (last N)
+    const trimmed = lines.slice(-maxItems).join("\n") + "\n";
+    return content.replace(match[0], `## ${heading}\n${trimmed}`);
   }
 
   private appendToSection(content: string, heading: string, items: string[]): string {

@@ -138,5 +138,73 @@ export function registerInspectRoutes(
         return { ok: true, count: entries.length, entries };
       },
     );
+
+    // C4: Learning curve data — aggregated daily stats for charts
+    app.get<{ Querystring: { agentId: string; days?: number } }>(
+      "/inspect/learning-curve",
+      {
+        schema: {
+          querystring: {
+            type: "object",
+            required: ["agentId"],
+            properties: {
+              agentId: { type: "string", minLength: 1 },
+              days: { type: "number", minimum: 1, maximum: 365 },
+            },
+          },
+        },
+      },
+      async (request) => {
+        const days = request.query.days ?? 30;
+        const since = Date.now() - days * 86_400_000;
+        const entries = await expStore.query({
+          agentId: request.query.agentId,
+          since,
+          limit: 1000,
+        });
+
+        // Aggregate by day
+        const byDay = new Map<
+          string,
+          { count: number; scores: number[]; success: number; patterns: number }
+        >();
+
+        for (const e of entries) {
+          const day = new Date(e.timestamp).toISOString().slice(0, 10);
+          const bucket = byDay.get(day) ?? {
+            count: 0,
+            scores: [],
+            success: 0,
+            patterns: 0,
+          };
+          bucket.count++;
+          if (e.selfScore != null) bucket.scores.push(e.selfScore);
+          if (e.success) bucket.success++;
+          bucket.patterns += e.patterns.length;
+          byDay.set(day, bucket);
+        }
+
+        const curve = Array.from(byDay.entries())
+          .map(([date, b]) => ({
+            date,
+            experiences: b.count,
+            avgScore:
+              b.scores.length > 0
+                ? Math.round(
+                    (b.scores.reduce((a, v) => a + v, 0) / b.scores.length) *
+                      10,
+                  ) / 10
+                : null,
+            successRate:
+              b.count > 0
+                ? Math.round((b.success / b.count) * 100) / 100
+                : 0,
+            patterns: b.patterns,
+          }))
+          .sort((a, b) => a.date.localeCompare(b.date));
+
+        return { ok: true, agentId: request.query.agentId, days, curve };
+      },
+    );
   }
 }

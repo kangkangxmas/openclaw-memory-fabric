@@ -12,7 +12,7 @@ describe("ScoringService.score()", () => {
     });
 
     assert.ok(result.selfScore >= 0 && result.selfScore <= 100);
-    assert.ok(result.scoreRationale.includes("Heuristic"));
+    assert.ok(result.scoreRationale.includes("goal="));
   });
 
   it("returns lower score for failed sessions", async () => {

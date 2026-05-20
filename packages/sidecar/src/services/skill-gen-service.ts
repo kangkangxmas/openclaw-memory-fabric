@@ -44,7 +44,7 @@ interface LLMResponse {
 // Constants
 // ---------------------------------------------------------------------------
 
-const MIN_CONFIDENCE = 5;
+const MIN_CONFIDENCE = 3;
 
 const SYSTEM_PROMPT = `You are an OpenClaw Agent Skill document generator.
 Generate concise, actionable SKILL.md content. No markdown code fences around the output.`;
