@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "fs/promises";
+import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import {
@@ -9,6 +9,7 @@ import {
 import type { SidecarConfig } from "../config/index.js";
 import { readJsonl, appendJsonl, ensureDir } from "../utils/jsonl.js";
 import type { VectorService } from "./vector-service.js";
+import { computeDecayScore, readSummaryVersion, updateSummaryWithVersion } from "./lifecycle-service.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -226,8 +227,13 @@ export class OpenVikingService {
         .filter((e): e is MemoryEntry => e !== undefined)
         .slice(0, maxEntries);
     } else {
+      // D1: Combine TF-IDF relevance with decay freshness
+      const now = Date.now();
       scored = allEntries
-        .map((e) => ({ entry: e, score: tfidfMap.get(e.id) ?? 0 }))
+        .map((e) => ({
+          entry: e,
+          score: (tfidfMap.get(e.id) ?? 0) * (0.7 + 0.3 * computeDecayScore(e, now)),
+        }))
         .sort((a, b) => {
           if (b.score !== a.score) return b.score - a.score;
           return new Date(b.entry.createdAt).getTime() - new Date(a.entry.createdAt).getTime();
@@ -305,16 +311,23 @@ export class OpenVikingService {
       }
     }
 
-    // Update summary file (last-write-wins for now)
+    // D3: Update summary with optimistic version locking
     const summaryPath = join(dir, "summary.json");
-    const existingSummary = existsSync(summaryPath)
-      ? (JSON.parse(await readFile(summaryPath, "utf8")) as object)
-      : {};
-    await writeFile(
+    const currentVersion = await readSummaryVersion(summaryPath);
+    const updated = await updateSummaryWithVersion(
       summaryPath,
-      JSON.stringify({ ...existingSummary, lastCommit: now, agentId, projectId, scope }, null, 2),
-      "utf8"
+      { lastCommit: now, agentId, projectId, scope },
+      currentVersion,
     );
+    if (!updated) {
+      // Conflict detected — retry once with fresh version
+      const freshVersion = await readSummaryVersion(summaryPath);
+      await updateSummaryWithVersion(
+        summaryPath,
+        { lastCommit: now, agentId, projectId, scope },
+        freshVersion,
+      );
+    }
 
     const uri = buildVikingUri({
       targetRoot: this.cfg.targetRoot,
