@@ -30,6 +30,8 @@ import { VectorService } from "./services/vector-service.js";
 import { ScoringService } from "./services/scoring-service.js";
 import { SharingService } from "./services/sharing-service.js";
 import { registerBatchRoutes } from "./routes/batch.js";
+import { registerFederationRoutes } from "./routes/federation.js";
+import { FederationService } from "./services/federation-service.js";
 import { runGarbageCollection } from "./services/lifecycle-service.js";
 import type { ErrorResponse } from "./models/index.js";
 
@@ -134,6 +136,10 @@ export async function buildServer() {
   registerSkillsRoute(app, skillGen);
   registerReportRoute(app, scoringService, expStore);
   registerBatchRoutes(app, openviking, graphify);
+
+  // Phase F: Federation
+  const federation = new FederationService(cfg.carriers.root);
+  registerFederationRoutes(app, federation);
 
   // D4: Garbage collection endpoint
   app.post("/lifecycle/gc", async () => {
