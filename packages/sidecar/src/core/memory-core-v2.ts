@@ -39,6 +39,15 @@ import { MemoryIndex } from "./memory-index.js";
 import { MemoryCache } from "./memory-cache.js";
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Escape special regex characters in a string. */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -379,14 +388,24 @@ export class MemoryCoreV2 {
         results = candidates.filter((e) => semanticIds.has(e.id));
       }
 
-      // Fallback: keyword search if no semantic results
+      // Fallback: keyword search with TF-IDF-like scoring if no semantic results
       if (results.length === 0) {
         strategies.push("keyword");
-        const query = opts.text.toLowerCase();
-        results = candidates.filter((e) => {
-          const text = getMemoryText(e).toLowerCase();
-          return text.includes(query);
-        });
+        const queryTerms = opts.text.toLowerCase().split(/\s+/).filter(Boolean);
+        results = candidates
+          .map((e) => {
+            const text = getMemoryText(e).toLowerCase();
+            // Score: count how many query terms appear in the text
+            let score = 0;
+            for (const term of queryTerms) {
+              const count = (text.match(new RegExp(escapeRegex(term), "g")) ?? []).length;
+              score += count;
+            }
+            return { entry: e, score };
+          })
+          .filter((r) => r.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map((r) => r.entry);
       }
     }
 
