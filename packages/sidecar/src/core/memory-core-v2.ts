@@ -621,11 +621,19 @@ export class MemoryCoreV2 {
     }
   }
 
+  /** Resolve the filesystem base directory using the viking:// URI convention. */
+  private resolveBaseDir(): string {
+    // Parse viking://org/<org> to extract org segment
+    const match = this.cfg.targetRoot.match(/^viking:\/\/org\/([^/]+)/);
+    const org = match?.[1] ?? "default";
+    return join(this.cfg.basePath, org);
+  }
+
   private async loadScope(scope: MemoryScope): Promise<MemoryEntryV2[]> {
     const entries: MemoryEntryV2[] = [];
 
-    // Scan all agent directories
-    const basePath = join(this.cfg.basePath, this.cfg.targetRoot);
+    // Resolve base directory using viking:// URI convention
+    const basePath = this.resolveBaseDir();
     const { readdir } = await import("fs/promises");
 
     try {
@@ -637,19 +645,51 @@ export class MemoryCoreV2 {
       for (const agentDir of agentDirs) {
         if (!agentDir.isDirectory()) continue;
 
+        // V2 path: agents/{agentId}/{scope}/memories.jsonl
         const scopeDir = join(agentsDir, agentDir.name, scope);
         const memoriesPath = join(scopeDir, "memories.jsonl");
 
-        if (!existsSync(memoriesPath)) continue;
+        if (existsSync(memoriesPath)) {
+          const raw = await readJsonl<MemoryEntryV2>(memoriesPath);
 
-        const raw = await readJsonl<MemoryEntryV2>(memoriesPath);
+          for (const entry of raw) {
+            if (validateMemoryEntryV2(entry)) {
+              entries.push(entry);
+            } else if ((entry as any).id && (entry as any).type && (entry as any).content) {
+              const { migrateV1ToV2 } = await import("../models/schema-v2.js");
+              entries.push(migrateV1ToV2(entry as any));
+            }
+          }
+        }
 
-        for (const entry of raw) {
-          if (validateMemoryEntryV2(entry)) {
-            entries.push(entry);
-          } else if ((entry as any).id && (entry as any).type && (entry as any).content) {
-            const { migrateV1ToV2 } = await import("../models/schema-v2.js");
-            entries.push(migrateV1ToV2(entry as any));
+        // V1 compat: also scan agents/{agentId}/projects/*/memories.jsonl
+        // V1 stores memories under project directories, which map to 'project' scope in V2
+        if (scope === "project" || scope === "shared") {
+          const projectsDir = join(agentsDir, agentDir.name, "projects");
+          if (existsSync(projectsDir)) {
+            try {
+              const projectDirs = await readdir(projectsDir, { withFileTypes: true });
+              for (const pDir of projectDirs) {
+                if (!pDir.isDirectory()) continue;
+                const v1Path = join(projectsDir, pDir.name, "memories.jsonl");
+                if (!existsSync(v1Path)) continue;
+
+                const raw = await readJsonl<MemoryEntryV2>(v1Path);
+                for (const entry of raw) {
+                  // Skip duplicates (same ID already loaded from V2 path)
+                  if (entries.some((e) => e.id === entry.id)) continue;
+
+                  if (validateMemoryEntryV2(entry)) {
+                    entries.push(entry);
+                  } else if ((entry as any).id && (entry as any).type && (entry as any).content) {
+                    const { migrateV1ToV2 } = await import("../models/schema-v2.js");
+                    entries.push(migrateV1ToV2(entry as any));
+                  }
+                }
+              }
+            } catch {
+              // Project scan failure is non-fatal
+            }
           }
         }
       }
@@ -669,7 +709,7 @@ export class MemoryCoreV2 {
       byAgent.set(entry.agentId, list);
     }
 
-    const basePath = join(this.cfg.basePath, this.cfg.targetRoot);
+    const basePath = this.resolveBaseDir();
 
     for (const [agentId, agentEntries] of byAgent) {
       const dir = join(basePath, "agents", agentId, scope);
