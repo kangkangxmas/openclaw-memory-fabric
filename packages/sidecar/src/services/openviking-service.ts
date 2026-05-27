@@ -11,11 +11,24 @@ import { readJsonl, appendJsonl, ensureDir } from "../utils/jsonl.js";
 import type { VectorService } from "./vector-service.js";
 import { computeDecayScore, readSummaryVersion, updateSummaryWithVersion } from "./lifecycle-service.js";
 import { getTemplateConfig, formatBriefWithTemplate } from "./brief-templates.js";
+import {
+  type MemoryEntryV2,
+  type MemoryType,
+  MemoryEntryBuilder,
+  generateMemoryId,
+  getMemoryText,
+  touchMemory
+} from "../models/schema-v2.js";
+import { MigrationService } from "./migration-service.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * @deprecated Use MemoryEntryV2 from schema-v2.ts
+ * 保留以向后兼容，新代码应使用 MemoryEntryV2
+ */
 export interface MemoryEntry {
   id: string;
   type: "fact" | "decision" | "entity" | "pattern" | "unresolved";
@@ -27,6 +40,9 @@ export interface MemoryEntry {
   createdAt: string;
   tags: string[];
 }
+
+/** 内部使用 V2 类型 */
+type InternalMemoryEntry = MemoryEntryV2;
 
 export interface RecallResult {
   memoryBrief: string;
@@ -45,6 +61,8 @@ export interface CommitPayload {
   entities?: string[];
   patterns?: string[];
   unresolved?: string[];
+  /** V2: Task type for metadata tagging */
+  taskType?: string;
 }
 
 export interface CommitResult {
@@ -57,7 +75,18 @@ export interface MemoryInspectResult {
   agentId: string;
   projectId?: string;
   scope: MemoryScope;
+  /** @deprecated 返回 V2 条目 */
   entries: MemoryEntry[];
+  totalEntries: number;
+  scopesRead: MemoryScope[];
+}
+
+/** V2 版本的检查结果 */
+export interface MemoryInspectResultV2 {
+  agentId: string;
+  projectId?: string;
+  scope: MemoryScope;
+  entries: MemoryEntryV2[];
   totalEntries: number;
   scopesRead: MemoryScope[];
 }
@@ -83,7 +112,7 @@ const MAX_ENTRIES_BY_DEPTH: Record<string, number> = {
 // ---------------------------------------------------------------------------
 
 function uid(): string {
-  return `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  return generateMemoryId();
 }
 
 // ---------------------------------------------------------------------------
@@ -129,13 +158,19 @@ function computeIDF(
  * Score an entry against a query using TF-IDF.
  * Falls back gracefully: returns 1 when query is empty (treat all equal).
  */
+/**
+ * Score an entry against a query using TF-IDF.
+ * Supports both V1 (MemoryEntry) and V2 (MemoryEntryV2) entries.
+ */
 function scoreEntryTFIDF(
-  entry: MemoryEntry,
+  entry: MemoryEntry | MemoryEntryV2,
   queryTerms: string[],
   idf: Map<string, number>
 ): number {
   if (queryTerms.length === 0) return 1;
-  const docTokens = tokenize(entry.content);
+  // V2 entries may have blocks - use getMemoryText for full text
+  const text = "timeline" in entry ? getMemoryText(entry as MemoryEntryV2) : entry.content;
+  const docTokens = tokenize(text);
   const tf = computeTF(docTokens);
   let score = 0;
   for (const term of queryTerms) {
@@ -146,12 +181,15 @@ function scoreEntryTFIDF(
 
 /** Build a corpus-aware TF-IDF scorer for a set of entries and query */
 function buildTFIDFScorer(
-  entries: MemoryEntry[],
+  entries: Array<MemoryEntry | MemoryEntryV2>,
   query: string
-): (entry: MemoryEntry) => number {
+): (entry: MemoryEntry | MemoryEntryV2) => number {
   if (!query.trim()) return () => 1;
   const queryTerms = tokenize(query);
-  const corpus = entries.map((e) => tokenize(e.content));
+  const corpus = entries.map((e) => {
+    const text = "timeline" in e ? getMemoryText(e as MemoryEntryV2) : e.content;
+    return tokenize(text);
+  });
   const idf = computeIDF(queryTerms, corpus);
   return (entry) => scoreEntryTFIDF(entry, queryTerms, idf);
 }
@@ -170,7 +208,7 @@ function resolveScope(raw: string | undefined): MemoryScope {
 // ---------------------------------------------------------------------------
 
 interface IndexEntry {
-  entries: MemoryEntry[];
+  entries: MemoryEntryV2[];
   loadedAt: number;
 }
 
@@ -180,18 +218,22 @@ const INDEX_TTL_MS = 60_000;
 export class OpenVikingService {
   /** E1: Per-scope index cache to avoid repeated JSONL full-scan */
   private readonly indexCache = new Map<string, IndexEntry>();
+  /** Schema V2 migration service */
+  private readonly migrationService: MigrationService;
 
   constructor(
     private readonly cfg: SidecarConfig["openviking"],
     private readonly vectorService?: VectorService
-  ) {}
+  ) {
+    this.migrationService = new MigrationService(cfg);
+  }
 
-  /** Load entries for a scope, using cache if fresh. */
+  /** Load entries for a scope, using cache if fresh. Auto-migrates V1 to V2. */
   private async loadScopeEntries(
     agentId: string,
     scope: MemoryScope,
     projectId?: string,
-  ): Promise<MemoryEntry[]> {
+  ): Promise<MemoryEntryV2[]> {
     const dir = resolveScopePath({
       basePath: this.cfg.basePath,
       targetRoot: this.cfg.targetRoot,
@@ -207,8 +249,13 @@ export class OpenVikingService {
       return cached.entries;
     }
 
+    // Auto-migration: check if migration is needed
+    if (await this.migrationService.needsMigration(dir)) {
+      await this.migrationService.migrateFile(memoriesPath);
+    }
+
     try {
-      const entries = await readJsonl<MemoryEntry>(memoriesPath);
+      const entries = await readJsonl<MemoryEntryV2>(memoriesPath);
       this.indexCache.set(cacheKey, { entries, loadedAt: Date.now() });
       return entries;
     } catch {
@@ -250,7 +297,7 @@ export class OpenVikingService {
     const maxEntries = MAX_ENTRIES_BY_DEPTH[depth] ?? 5;
 
     const scopesToRead: MemoryScope[] = this.buildReadScopes(scope, !!projectId);
-    const allEntries: MemoryEntry[] = [];
+    const allEntries: MemoryEntryV2[] = [];
     const sourceLabels: string[] = [];
 
     for (const s of scopesToRead) {
@@ -261,14 +308,14 @@ export class OpenVikingService {
       }
     }
 
-    // Score using TF-IDF
+    // Score using TF-IDF (supports V2 with blocks)
     const scorer = buildTFIDFScorer(allEntries, query);
     const tfidfMap = new Map<string, number>();
     for (const e of allEntries) {
       tfidfMap.set(e.id, scorer(e));
     }
 
-    let scored: MemoryEntry[];
+    let scored: MemoryEntryV2[];
 
     // P2-1: If vector service is available, use hybrid ranking
     if (this.vectorService && query.trim()) {
@@ -276,7 +323,7 @@ export class OpenVikingService {
       const entryMap = new Map(allEntries.map((e) => [e.id, e]));
       scored = hybrid
         .map((h) => entryMap.get(h.entryId))
-        .filter((e): e is MemoryEntry => e !== undefined)
+        .filter((e): e is MemoryEntryV2 => e !== undefined)
         .slice(0, maxEntries);
     } else {
       // D1: Combine TF-IDF relevance with decay freshness
@@ -288,7 +335,7 @@ export class OpenVikingService {
         }))
         .sort((a, b) => {
           if (b.score !== a.score) return b.score - a.score;
-          return new Date(b.entry.createdAt).getTime() - new Date(a.entry.createdAt).getTime();
+          return new Date(b.entry.timeline.createdAt).getTime() - new Date(a.entry.timeline.createdAt).getTime();
         })
         .slice(0, maxEntries)
         .map((s) => s.entry);
@@ -334,10 +381,8 @@ export class OpenVikingService {
     const memoriesPath = join(dir, "memories.jsonl");
     const now = new Date().toISOString();
 
-    const toWrite: Array<{ type: MemoryEntry["type"]; content: string }> = [
-      ...facts
-        .map((c) => ({ type: "fact" as const, c }))
-        .map(({ c }) => ({ type: "fact" as const, content: c })),
+    const toWrite: Array<{ type: MemoryType; content: string }> = [
+      ...facts.map((c) => ({ type: "fact" as const, content: c })),
       ...decisions.map((c) => ({ type: "decision" as const, content: c })),
       ...entities.map((c) => ({ type: "entity" as const, content: c })),
       ...patterns.map((c) => ({ type: "pattern" as const, content: c })),
@@ -345,22 +390,24 @@ export class OpenVikingService {
     ];
 
     for (const item of toWrite) {
-      const entry: MemoryEntry = {
-        id: uid(),
-        type: item.type,
-        content: item.content,
-        agentId,
-        projectId,
-        scope,
-        visibility,
-        createdAt: now,
-        tags: []
-      };
+      // V2: Use builder for structured entry
+      const entry = new MemoryEntryBuilder()
+        .id(uid())
+        .type(item.type)
+        .content(item.content)
+        .agentId(agentId)
+        .projectId(projectId)
+        .scope(scope)
+        .visibility(visibility)
+        .timeline({ createdAt: now, updatedAt: now, version: 1 })
+        .metadata({ tags: [], taskType: payload.taskType })
+        .build();
+
       await appendJsonl(memoriesPath, entry);
 
       // P2-1: Async vector index (fire-and-forget)
       if (this.vectorService) {
-        void this.vectorService.index(entry.id, agentId, entry.content);
+        void this.vectorService.index(entry.id, agentId, getMemoryText(entry));
       }
     }
 
@@ -445,7 +492,7 @@ export class OpenVikingService {
     const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
     const scopesToRead = this.buildReadScopes(scope, !!projectId);
 
-    const allEntries: MemoryEntry[] = [];
+    const allEntries: MemoryEntryV2[] = [];
     for (const s of scopesToRead) {
       const entries = await this.loadScopeEntries(agentId, s, projectId);
       allEntries.push(...entries);
@@ -455,7 +502,8 @@ export class OpenVikingService {
     // For inspect: keep substring filter for exact match UX, but also allow TF-IDF partial matches
     const filtered = normalizedQuery
       ? allEntries.filter((entry) => {
-          const haystack = `${entry.type} ${entry.content} ${(entry.tags ?? []).join(" ")}`.toLowerCase();
+          const text = getMemoryText(entry);
+          const haystack = `${entry.type} ${text} ${(entry.metadata.tags ?? []).join(" ")}`.toLowerCase();
           // Include if exact substring match OR any query token present
           if (haystack.includes(normalizedQuery)) return true;
           const queryTokens = tokenize(normalizedQuery);
@@ -464,14 +512,28 @@ export class OpenVikingService {
       : allEntries;
 
     const sorted = filtered.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      (a, b) => new Date(b.timeline.createdAt).getTime() - new Date(a.timeline.createdAt).getTime()
     );
+
+    // V2: Update access stats for inspected entries
+    const touched = sorted.slice(0, limit).map(e => touchMemory(e));
 
     return {
       agentId,
       projectId,
       scope,
-      entries: sorted.slice(0, limit),
+      // Return V1-compatible format for backward compatibility
+      entries: touched.map(e => ({
+        id: e.id,
+        type: e.type as MemoryEntry["type"],
+        content: e.content,
+        agentId: e.agentId,
+        projectId: e.projectId,
+        scope: e.scope,
+        visibility: e.visibility,
+        createdAt: e.timeline.createdAt,
+        tags: e.metadata.tags
+      })),
       totalEntries: filtered.length,
       scopesRead: scopesToRead
     };
@@ -490,16 +552,103 @@ export class OpenVikingService {
   }
 
   private formatBrief(
-    entries: MemoryEntry[],
+    entries: MemoryEntryV2[],
     ctx: { agentId: string; projectId?: string; scope: MemoryScope; depth: string; taskType?: string }
   ): string {
     const template = getTemplateConfig(ctx.taskType);
     const maxEntries = MAX_ENTRIES_BY_DEPTH[ctx.depth] ?? 5;
     return formatBriefWithTemplate(
-      entries.map((e) => ({ type: e.type, content: e.content })),
+      entries.map((e) => ({ type: e.type, content: getMemoryText(e) })),
       ctx,
       template,
       maxEntries
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // V2 API - New methods for Schema V2
+  // -------------------------------------------------------------------------
+
+  /** V2: Inspect memory with full V2 entries */
+  async inspectMemoryV2(opts: {
+    agentId: string;
+    projectId?: string;
+    scope?: string;
+    query?: string;
+    limit?: number;
+  }): Promise<MemoryInspectResultV2> {
+    const { agentId, projectId, query = "" } = opts;
+    const scope = resolveScope(opts.scope);
+    const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
+    const scopesToRead = this.buildReadScopes(scope, !!projectId);
+
+    const allEntries: MemoryEntryV2[] = [];
+    for (const s of scopesToRead) {
+      const entries = await this.loadScopeEntries(agentId, s, projectId);
+      allEntries.push(...entries);
+    }
+
+    const normalizedQuery = query.trim().toLowerCase();
+    const filtered = normalizedQuery
+      ? allEntries.filter((entry) => {
+          const text = getMemoryText(entry);
+          const haystack = `${entry.type} ${text} ${(entry.metadata.tags ?? []).join(" ")}`.toLowerCase();
+          if (haystack.includes(normalizedQuery)) return true;
+          const queryTokens = tokenize(normalizedQuery);
+          return queryTokens.some((t) => haystack.includes(t));
+        })
+      : allEntries;
+
+    const sorted = filtered.sort(
+      (a, b) => new Date(b.timeline.createdAt).getTime() - new Date(a.timeline.createdAt).getTime()
+    );
+
+    // Update access stats
+    const touched = sorted.slice(0, limit).map(e => touchMemory(e));
+
+    return {
+      agentId,
+      projectId,
+      scope,
+      entries: touched,
+      totalEntries: filtered.length,
+      scopesRead: scopesToRead
+    };
+  }
+
+  /** V2: Get migration status for an agent */
+  async getMigrationStatus(agentId: string): Promise<{
+    private: boolean;
+    projects: Record<string, boolean>;
+  }> {
+    const result = { private: false, projects: {} as Record<string, boolean> };
+    
+    result.private = await this.migrationService.needsMigration(
+      resolveScopePath({
+        basePath: this.cfg.basePath,
+        targetRoot: this.cfg.targetRoot,
+        agentId,
+        scope: "private"
+      })
+    );
+
+    const projectsDir = join(this.cfg.basePath, "org", "default", "agents", agentId, "projects");
+    if (existsSync(projectsDir)) {
+      const { readdir } = await import("fs/promises");
+      const dirs = await readdir(projectsDir, { withFileTypes: true });
+      for (const dir of dirs) {
+        if (!dir.isDirectory()) continue;
+        const projectPath = resolveScopePath({
+          basePath: this.cfg.basePath,
+          targetRoot: this.cfg.targetRoot,
+          agentId,
+          scope: "project",
+          projectId: dir.name
+        });
+        result.projects[dir.name] = await this.migrationService.needsMigration(projectPath);
+      }
+    }
+
+    return result;
   }
 }

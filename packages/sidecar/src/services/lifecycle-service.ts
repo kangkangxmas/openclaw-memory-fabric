@@ -15,8 +15,11 @@ import { readFile, writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { readJsonl, writeJsonl } from "../utils/jsonl.js";
 
-import type { MemoryEntry } from "./openviking-service.js";
+import type { MemoryEntryV2, getMemoryAgeDays, isMemoryExpired } from "../models/schema-v2.js";
 import type { SharedEntry } from "./shared-service.js";
+
+// Backward compatibility type
+import type { MemoryEntry } from "./openviking-service.js";
 
 // ---------------------------------------------------------------------------
 // D1: Decay scoring
@@ -31,11 +34,16 @@ const _MAX_AGE_DAYS = 180;
 
 /**
  * Compute a decay score for a memory entry.
+ * Supports both V1 (MemoryEntry) and V2 (MemoryEntryV2) entries.
  * Score ranges from 1.0 (brand new) to ~0 (very old).
  * Type bonuses: decisions and patterns decay slower than facts.
  */
-export function computeDecayScore(entry: MemoryEntry, now = Date.now()): number {
-  const ageMs = now - new Date(entry.createdAt).getTime();
+export function computeDecayScore(entry: MemoryEntry | MemoryEntryV2, now = Date.now()): number {
+  // V2 entries use timeline.createdAt
+  const createdAt = "timeline" in entry 
+    ? entry.timeline.createdAt 
+    : entry.createdAt;
+  const ageMs = now - new Date(createdAt).getTime();
   const ageDays = ageMs / 86_400_000;
 
   // Base decay: exponential with configurable rate
@@ -48,7 +56,14 @@ export function computeDecayScore(entry: MemoryEntry, now = Date.now()): number 
   // facts and unresolved get no bonus
 
   // Content length bonus: longer entries tend to be more substantive
-  if (entry.content.length > 50) score *= 1.1;
+  const content = "timeline" in entry ? entry.content : entry.content;
+  if (content.length > 50) score *= 1.1;
+
+  // V2: Access frequency bonus - frequently accessed memories decay slower
+  if ("metadata" in entry && entry.metadata.accessCount) {
+    const accessBonus = Math.min(entry.metadata.accessCount * 0.05, 0.3);
+    score *= (1 + accessBonus);
+  }
 
   return Math.min(1, Math.max(0, score));
 }

@@ -62,4 +62,19 @@ export class VectorStore {
   size(): number {
     return this.memory.size;
   }
+
+  /** Check if an entry exists. */
+  has(entryId: string): boolean {
+    return this.memory.has(entryId);
+  }
+
+  /** Remove a vector. */
+  async remove(entryId: string): Promise<void> {
+    this.memory.delete(entryId);
+  }
+
+  /** Clear all vectors. */
+  async clear(): Promise<void> {
+    this.memory.clear();
+  }
 }
