@@ -381,6 +381,15 @@ export class OpenVikingService {
     const memoriesPath = join(dir, "memories.jsonl");
     const now = new Date().toISOString();
 
+    // Load existing entries to deduplicate by content
+    const existingContents = new Set<string>();
+    if (existsSync(memoriesPath)) {
+      const existing = await readJsonl<MemoryEntryV2>(memoriesPath);
+      for (const e of existing) {
+        existingContents.add(e.content.trim().toLowerCase());
+      }
+    }
+
     const toWrite: Array<{ type: MemoryType; content: string }> = [
       ...facts.map((c) => ({ type: "fact" as const, content: c })),
       ...decisions.map((c) => ({ type: "decision" as const, content: c })),
@@ -390,6 +399,9 @@ export class OpenVikingService {
     ];
 
     for (const item of toWrite) {
+      // Skip duplicates - same content already exists
+      if (existingContents.has(item.content.trim().toLowerCase())) continue;
+
       // V2: Use builder for structured entry
       const entry = new MemoryEntryBuilder()
         .id(uid())
