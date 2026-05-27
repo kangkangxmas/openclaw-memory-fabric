@@ -35,6 +35,8 @@ import {
   resolveScopePath,
   type MemoryScope,
 } from "../adapters/openviking-adapter.js";
+import { MemoryIndex } from "./memory-index.js";
+import { MemoryCache } from "./memory-cache.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,7 +68,7 @@ export interface MemoryQuery {
 export interface MemoryQueryResult {
   entries: MemoryEntryV2[];
   total: number;
-  query: MemoryQuery;
+  query?: MemoryQuery;
   /** Which strategies were used */
   strategies: string[];
   /** Execution time in ms */
@@ -115,6 +117,9 @@ type EventHandler = (event: MemoryEvent) => void | Promise<void>;
 export class MemoryCoreV2 {
   private readonly eventHandlers = new Map<string, EventHandler[]>();
   private readonly migrationService: MigrationService;
+  private readonly index: MemoryIndex;
+  private readonly cache: MemoryCache;
+  private indexBuilt = false;
 
   constructor(
     private readonly cfg: SidecarConfig["openviking"],
@@ -122,6 +127,8 @@ export class MemoryCoreV2 {
     private readonly embedder?: EmbeddingServiceV2
   ) {
     this.migrationService = new MigrationService(cfg);
+    this.index = new MemoryIndex();
+    this.cache = new MemoryCache();
   }
 
   // -------------------------------------------------------------------------
@@ -155,6 +162,11 @@ export class MemoryCoreV2 {
     const newEntry = builder.build();
     await this.persist(newEntry);
 
+    // Update index and cache
+    this.index.add(newEntry);
+    this.cache.setEntry(newEntry.id, newEntry);
+    this.cache.invalidateQueryCaches();
+
     // Generate embedding if embedder available
     if (this.embedder) {
       const embedding = await this.embedder.embed(getMemoryText(newEntry));
@@ -175,6 +187,12 @@ export class MemoryCoreV2 {
 
   /** Read a single entry by ID. */
   async read(entryId: string): Promise<MemoryEntryV2 | null> {
+    // Check cache first
+    const cached = this.cache.getEntry(entryId);
+    if (cached) {
+      return cached;
+    }
+
     // Search across all scopes
     const scopes: MemoryScope[] = ["private", "project", "shared"];
     for (const scope of scopes) {
@@ -188,6 +206,8 @@ export class MemoryCoreV2 {
           this.updateEntryDirect(touched).catch(() => {});
           this.emit("accessed", { entryId, agentId: entry.agentId }).catch(() => {});
         });
+        // Cache the result
+        this.cache.setEntry(entryId, touched);
         return touched;
       }
     }
@@ -229,6 +249,10 @@ export class MemoryCoreV2 {
 
     await this.saveScope(scope, filtered);
 
+    // Remove from index and cache
+    this.index.remove(entryId);
+    this.cache.invalidateEntry(entryId);
+
     // Remove from vector store
     if (this.vectorService) {
       await this.vectorService.remove(entryId);
@@ -247,10 +271,52 @@ export class MemoryCoreV2 {
     const startTime = Date.now();
     const strategies: string[] = [];
 
+    // Check query cache first
+    const cacheKey = MemoryCache.generateQueryKey(opts as Record<string, unknown>);
+    const cached = this.cache.getQuery(cacheKey);
+    if (cached) {
+      return {
+        entries: cached,
+        total: cached.length,
+        strategies: ["cache"],
+        executionTimeMs: Date.now() - startTime,
+      };
+    }
+
+    // Build index if not already built
+    if (!this.indexBuilt) {
+      const allEntries: MemoryEntryV2[] = [];
+      const scopes: MemoryScope[] = ["private", "project", "shared"];
+      for (const scope of scopes) {
+        const entries = await this.loadScope(scope);
+        allEntries.push(...entries);
+      }
+      this.index.build(allEntries);
+      this.indexBuilt = true;
+    }
+
+    // Use index for fast filtering when possible
+    let candidateIds: string[] | undefined;
+    if (opts.text || opts.types || opts.tags || opts.agentId || opts.projectId || opts.timeRange) {
+      candidateIds = this.index.query({
+        text: opts.text,
+        types: opts.types,
+        tags: opts.tags,
+        agentId: opts.agentId,
+        projectId: opts.projectId,
+        timeRange: opts.timeRange,
+      });
+    }
+
     // Load all candidate entries
-    // If scope specified, load that scope; otherwise load all scopes
     let candidates: MemoryEntryV2[] = [];
-    if (opts.scope) {
+    if (candidateIds && candidateIds.length > 0) {
+      // Load only indexed entries
+      for (const id of candidateIds) {
+        const entry = await this.read(id);
+        if (entry) candidates.push(entry);
+      }
+    } else if (opts.scope) {
       candidates = await this.loadScope(opts.scope);
     } else {
       const scopes: MemoryScope[] = ["private", "project", "shared"];
@@ -260,23 +326,23 @@ export class MemoryCoreV2 {
       }
     }
 
-    // Filter by agent
-    if (opts.agentId) {
+    // Filter by agent (if not already indexed)
+    if (opts.agentId && !candidateIds) {
       candidates = candidates.filter((e) => e.agentId === opts.agentId);
     }
 
-    // Filter by project
-    if (opts.projectId) {
+    // Filter by project (if not already indexed)
+    if (opts.projectId && !candidateIds) {
       candidates = candidates.filter((e) => e.projectId === opts.projectId);
     }
 
-    // Filter by type
-    if (opts.types && opts.types.length > 0) {
+    // Filter by type (if not already indexed)
+    if (opts.types && opts.types.length > 0 && !candidateIds) {
       candidates = candidates.filter((e) => opts.types!.includes(e.type));
     }
 
-    // Filter by tags
-    if (opts.tags && opts.tags.length > 0) {
+    // Filter by tags (if not already indexed)
+    if (opts.tags && opts.tags.length > 0 && !candidateIds) {
       candidates = candidates.filter((e) =>
         opts.tags!.some((t) => e.metadata.tags?.includes(t))
       );
@@ -287,8 +353,8 @@ export class MemoryCoreV2 {
       candidates = candidates.filter((e) => !isMemoryExpired(e));
     }
 
-    // Time range filter
-    if (opts.timeRange) {
+    // Time range filter (if not already indexed)
+    if (opts.timeRange && !candidateIds) {
       if (opts.timeRange.from) {
         const from = new Date(opts.timeRange.from).getTime();
         candidates = candidates.filter((e) => new Date(e.timeline.createdAt).getTime() >= from);
@@ -337,10 +403,12 @@ export class MemoryCoreV2 {
 
     const executionTimeMs = Date.now() - startTime;
 
+    // Cache query results
+    this.cache.setQuery(cacheKey, results);
+
     return {
       entries: results,
       total,
-      query: opts,
       strategies,
       executionTimeMs,
     };
