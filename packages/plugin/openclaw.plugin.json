@@ -4,6 +4,22 @@
   "version": "1.8.0",
   "description": "Multi-agent memory orchestration plugin for OpenClaw. Provides memory isolation, cross-session persistence, long-term knowledge carriers, and structural cognition via Graphify.",
   "entry": "dist/index.js",
+  "contracts": {
+    "tools": [
+      "health_status",
+      "memory_brief",
+      "memory_commit",
+      "memory_publish_shared",
+      "memory_forget_scoped",
+      "project_bootstrap",
+      "project_state_refresh",
+      "project_graph_query",
+      "project_graph_path",
+      "project_graph_explain",
+      "carrier_read",
+      "carrier_merge"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "properties": {

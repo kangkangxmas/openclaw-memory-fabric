@@ -229,6 +229,24 @@ openclaw gateway restart
 
 > **注意**：`node_modules` 变更（依赖升级）不适合 rsync，需重新执行完整安装流程。
 
+## 9.3.2 OpenClaw 2026.5.25+ 插件契约要求
+
+OpenClaw 2026.5.25 起会在插件启动时校验工具注册契约。只要插件在运行时调用 `registerTool`，`openclaw.plugin.json` 必须同步声明 `contracts.tools`。Memory Fabric 当前声明的工具为：
+
+`health_status`, `memory_brief`, `memory_commit`, `memory_publish_shared`, `memory_forget_scoped`, `project_bootstrap`, `project_state_refresh`, `project_graph_query`, `project_graph_path`, `project_graph_explain`, `carrier_read`, `carrier_merge`.
+
+如果 gateway 日志出现下面的错误，说明 manifest 与运行时代码不一致：
+
+`plugin must declare contracts.tools before registering agent tools`
+
+修复步骤：
+
+1. 在 `packages/plugin/openclaw.plugin.json` 中补齐 `contracts.tools`。
+2. 确认 `packages/plugin/src/index.ts` 的 `register(api)` 中注册的工具名与 manifest 完全一致。
+3. 执行 `npm run build` 和 `npm test`。
+4. 同步 `packages/plugin/dist/`、`openclaw.plugin.json`、`skills/`、`package.json` 到 `~/.openclaw/extensions/memory-fabric/`。
+5. 执行 `openclaw gateway restart`，并用 `openclaw gateway status --deep`、`openclaw health` 验证。
+
 ## 9.4 目录准备
 ```bash
 mkdir -p ./runtime-data/carriers
