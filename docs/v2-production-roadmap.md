@@ -55,7 +55,7 @@
 - 设置 `MEMORY_FABRIC_V2_MODE=v2-recall`。
 - 保持 sidecar 旧 `/recall`、旧 Carrier、旧 JSONL 全部可用。
 - 每日查看 `/v2/gray/status?agentId=development`，确认 mode、worker、candidate queue、latest bench 和 readiness flags。
-- 每日查看 `/v2/recall/audit`，对比 legacy source count、legacy budget、v2 card count、v2 evidence count。
+- 每日查看 `/v2/recall/audit`，对比 legacy source count、legacy budget、legacy brief preview、v2 card count、v2 evidence refs、v2 memory ids 和 card previews。
 - 每日查看 `/v2/consolidation/status` 和 candidates stats，确保 pending 不堆积、needs_review 可解释。
 - 每日运行 `/v2/bench/run`，保存 `/v2/bench/report`。
 - 推荐使用统一 smoke 命令串联 fixture、seed、bench 和 gray status：
@@ -74,6 +74,7 @@ pnpm v2:gray-smoke -- --agent-id development --project-id openclaw-memory-fabric
 - v2 cards 命中率稳定，无空注入扩大。
 - Source Coverage 接近 1.0。
 - P95 latency <= 300ms。
+- Recall Audit 中 v2 card previews 与 query 相关，legacy/v2 差异可解释。
 - 无错误 candidate 被写入 `self-model.md`。
 
 ### Milestone B：真实 Bench Fixture

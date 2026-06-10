@@ -236,7 +236,7 @@ Response 包含：
 - `mode`：`MEMORY_FABRIC_V2_MODE` 当前值，默认 `shadow`
 - `worker`：ConsolidationWorker 状态
 - `candidateStats`：candidate queue 总量、状态和类型分布
-- `recallAudit`：最近 audit 数量、最近时间、v2 cards 与 legacy sources 均值
+- `recallAudit`：最近 audit 数量、最近时间、v2 cards/evidence/rendered chars 与 legacy sources/brief chars 均值
 - `bench`：最新 Bench report，可能为 `null`
 - `readiness`：`modeReady`、`sourceCoverageReady`、`latencyReady`、`candidateQueueHealthy`
 
@@ -268,9 +268,16 @@ Response 包含：
 
 记录 legacy recall 与 v2 recall 对照日志。plugin 在 `MEMORY_FABRIC_V2_MODE=v2-recall|v2-write` 且 v2 cards 命中时调用。
 
+Payload 可包含：
+
+- `legacy.sourceCount`、`legacy.budgetUsed`、`legacy.memoryBriefChars`
+- `legacy.sources`、`legacy.memoryBriefPreview`
+- `v2.intent`、`v2.cardCount`、`v2.evidenceCount`、`v2.renderedChars`、`v2.executionTimeMs`
+- `v2.memoryIds`、`v2.evidenceRefs`、`v2.cardPreviews`
+
 ### GET /v2/recall/audit
 
-查询 recall 对照日志，支持 `agentId`、`projectId`、`limit`。
+查询 recall 对照日志，支持 `agentId`、`projectId`、`limit`。返回最近 audit entries，包含 query、mode、legacy 对照指标、v2 memory ids、evidence refs 和卡片预览。
 
 ### GET /v2/memories/:id/trace
 

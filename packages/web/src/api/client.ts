@@ -19,6 +19,7 @@ import type {
   DependencyGraph,
   ApprovalEntry,
   V2RecallPlanResponse,
+  V2RecallAuditEntry,
   V2TraceResponse,
   V2CarrierDriftReport,
   V2CarrierProjectionRecord,
@@ -131,6 +132,15 @@ export const api = {
     scope?: "private" | "project" | "shared";
     limit?: number;
   }) => post<V2RecallPlanResponse>("/v2/recall/plan", req),
+
+  getV2RecallAudit: (agentId?: string, projectId?: string, limit = 20) =>
+    get<{ ok: boolean; entries: V2RecallAuditEntry[]; count: number }>(
+      `/v2/recall/audit${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+        `limit=${encodeURIComponent(String(limit))}`,
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
 
   getV2MemoryTrace: (memoryId: string) =>
     get<V2TraceResponse>(`/v2/memories/${encodeURIComponent(memoryId)}/trace`),

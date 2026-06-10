@@ -52,6 +52,11 @@ function v2RecallEnabled(): boolean {
   return process.env.MEMORY_FABRIC_V2_MODE === "v2-recall" || process.env.MEMORY_FABRIC_V2_MODE === "v2-write";
 }
 
+function preview(text: string, limit = 240): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
+}
+
 const TASK_TYPE_MARKERS: Array<[TaskType, MarkerFn[]]> = [
   ["code_review", [
     (m) => /\breview\b|PR\b|pull\s*request|diff\b|approve|LGTM/i.test(m),
@@ -171,7 +176,15 @@ export class RecallOrchestrator {
         });
         if (v2.cards.length > 0) {
           const evidence = [...new Set(v2.cards.flatMap((card) => card.evidence))];
-          let legacyForAudit: { sourceCount?: number; budgetUsed?: number; memoryBriefChars?: number } | undefined;
+          let legacyForAudit:
+            | {
+                sourceCount?: number;
+                budgetUsed?: number;
+                memoryBriefChars?: number;
+                sources?: string[];
+                memoryBriefPreview?: string;
+              }
+            | undefined;
           try {
             const legacy = await this.client.recall({
               agentId: ctx.agentId,
@@ -184,7 +197,9 @@ export class RecallOrchestrator {
             legacyForAudit = {
               sourceCount: legacy.sources.length,
               budgetUsed: legacy.budgetUsed,
-              memoryBriefChars: legacy.memoryBrief.length
+              memoryBriefChars: legacy.memoryBrief.length,
+              sources: legacy.sources.slice(0, 12),
+              memoryBriefPreview: preview(legacy.memoryBrief)
             };
           } catch {
             legacyForAudit = undefined;
@@ -195,8 +210,23 @@ export class RecallOrchestrator {
               projectId?: string;
               query: string;
               mode: string;
-              legacy?: { sourceCount?: number; budgetUsed?: number; memoryBriefChars?: number };
-              v2?: { intent?: string; cardCount?: number; evidenceCount?: number; renderedChars?: number; executionTimeMs?: number };
+              legacy?: {
+                sourceCount?: number;
+                budgetUsed?: number;
+                memoryBriefChars?: number;
+                sources?: string[];
+                memoryBriefPreview?: string;
+              };
+              v2?: {
+                intent?: string;
+                cardCount?: number;
+                evidenceCount?: number;
+                renderedChars?: number;
+                executionTimeMs?: number;
+                memoryIds?: string[];
+                evidenceRefs?: string[];
+                cardPreviews?: string[];
+              };
             }) => Promise<unknown>;
           };
           void auditClient.recallAudit?.({
@@ -210,7 +240,10 @@ export class RecallOrchestrator {
               cardCount: v2.cards.length,
               evidenceCount: evidence.length,
               renderedChars: v2.rendered.length,
-              executionTimeMs: v2.executionTimeMs
+              executionTimeMs: v2.executionTimeMs,
+              memoryIds: v2.cards.map((card) => card.memoryId).slice(0, 12),
+              evidenceRefs: evidence.slice(0, 24),
+              cardPreviews: v2.cards.map((card) => preview(card.content)).slice(0, 8)
             }
           }).catch(() => undefined);
           return {

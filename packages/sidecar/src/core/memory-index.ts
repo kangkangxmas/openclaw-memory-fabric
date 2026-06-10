@@ -223,6 +223,7 @@ export class MemoryIndex {
   searchText(query: string): string[] {
     const tokens = tokenize(query, this.config);
     if (tokens.length === 0) return [];
+    if (tokens.length === 1) return Array.from(this.textIndex.get(tokens[0]) ?? []);
 
     const scores = new Map<string, number>();
     for (const token of tokens) {

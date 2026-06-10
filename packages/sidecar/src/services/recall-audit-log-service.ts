@@ -15,6 +15,8 @@ export interface RecallAuditLogEntry {
     sourceCount?: number;
     budgetUsed?: number;
     memoryBriefChars?: number;
+    sources?: string[];
+    memoryBriefPreview?: string;
   };
   v2?: {
     intent?: string;
@@ -22,6 +24,9 @@ export interface RecallAuditLogEntry {
     evidenceCount?: number;
     renderedChars?: number;
     executionTimeMs?: number;
+    memoryIds?: string[];
+    evidenceRefs?: string[];
+    cardPreviews?: string[];
   };
   createdAt: string;
 }

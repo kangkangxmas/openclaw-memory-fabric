@@ -11,6 +11,7 @@ import type {
   V2BenchFixtureSet,
   V2BenchSeedResult,
   V2GrayStatus,
+  V2RecallAuditEntry,
   V2RecallPlanResponse,
   V2Relation,
   V2TraceResponse,
@@ -23,6 +24,11 @@ interface V2InspectorProps {
 
 function pct(value: number): string {
   return `${Math.round(value * 100)}%`;
+}
+
+function clip(value: string | undefined, limit = 96): string {
+  if (!value) return "";
+  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
 }
 
 function scopeForV2(scope: AppContext["scope"]): "private" | "project" | "shared" | undefined {
@@ -53,6 +59,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const [fixtures, setFixtures] = useState<V2BenchFixtureSet | null>(null);
   const [seed, setSeed] = useState<V2BenchSeedResult | null>(null);
   const [gray, setGray] = useState<V2GrayStatus | null>(null);
+  const [recallAudit, setRecallAudit] = useState<V2RecallAuditEntry[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -96,12 +103,13 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const loadOps = async () => {
-    const [candidateRes, statusRes, relationRes, grayRes, fixtureRes] = await Promise.all([
+    const [candidateRes, statusRes, relationRes, grayRes, fixtureRes, auditRes] = await Promise.all([
       api.getV2Candidates(ctx.agentId || undefined, ctx.projectId || undefined),
       api.getV2ConsolidationStatus(ctx.agentId || undefined, ctx.projectId || undefined),
       api.getV2GraphRelations(ctx.agentId || undefined, ctx.projectId || undefined),
       api.getV2GrayStatus(ctx.agentId || undefined, ctx.projectId || undefined),
       api.getV2BenchFixtures(),
+      api.getV2RecallAudit(ctx.agentId || undefined, ctx.projectId || undefined, 12),
     ]);
     setCandidates(candidateRes.candidates);
     setCandidateStats(statusRes.candidateStats);
@@ -109,6 +117,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setRelations(relationRes.relations);
     setGray(grayRes);
     setFixtures(fixtureRes);
+    setRecallAudit(auditRes.entries);
     if (grayRes.bench) setBench(grayRes.bench);
   };
 
@@ -278,6 +287,12 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                 <span>source {gray.readiness.sourceCoverageReady ? "ready" : "wait"}</span>
                 <span>latency {gray.readiness.latencyReady ? "ready" : "wait"}</span>
               </div>
+              <div className="mt-2 grid grid-cols-2 gap-1 text-muted">
+                <span>v2 cards {gray.recallAudit.avgV2CardCount.toFixed(1)}</span>
+                <span>v2 evidence {gray.recallAudit.avgV2EvidenceCount.toFixed(1)}</span>
+                <span>legacy src {gray.recallAudit.avgLegacySourceCount.toFixed(1)}</span>
+                <span>legacy chars {Math.round(gray.recallAudit.avgLegacyMemoryBriefChars)}</span>
+              </div>
             </div>
           )}
           {seed && (
@@ -348,6 +363,69 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
               </tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-line bg-panel shadow-card overflow-hidden">
+        <div className="border-b border-line px-4 py-3 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-bold text-ink">Recall Audit</div>
+            <div className="text-xs text-muted">legacy / v2 comparison for gray rollout</div>
+          </div>
+          <button
+            onClick={() => void run("ops", loadOps)}
+            disabled={!!loading}
+            className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
+          >
+            刷新
+          </button>
+        </div>
+        <div className="max-h-72 overflow-auto">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-panel text-muted">
+              <tr className="border-b border-line">
+                <th className="px-4 py-2 text-left font-medium">Time</th>
+                <th className="px-4 py-2 text-left font-medium">Query</th>
+                <th className="px-4 py-2 text-left font-medium">V2</th>
+                <th className="px-4 py-2 text-left font-medium">Legacy</th>
+                <th className="px-4 py-2 text-left font-medium">Preview</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recallAudit.map((entry) => (
+                <tr key={entry.auditId} className="border-b border-line/50 align-top">
+                  <td className="px-4 py-3 text-muted whitespace-nowrap">
+                    {new Date(entry.createdAt).toLocaleString()}
+                    <div className="mt-1 font-mono">{entry.mode}</div>
+                  </td>
+                  <td className="px-4 py-3 text-ink">{clip(entry.query, 120)}</td>
+                  <td className="px-4 py-3 text-muted">
+                    <div>{entry.v2?.intent ?? "unknown"}</div>
+                    <div>{entry.v2?.cardCount ?? 0} cards · {entry.v2?.evidenceCount ?? 0} evidence</div>
+                    <div className="mt-1 font-mono">{entry.v2?.memoryIds?.slice(0, 2).join(", ")}</div>
+                  </td>
+                  <td className="px-4 py-3 text-muted">
+                    <div>{entry.legacy?.sourceCount ?? 0} sources</div>
+                    <div>{entry.legacy?.budgetUsed ?? 0} budget</div>
+                    <div className="mt-1 font-mono">{entry.legacy?.sources?.slice(0, 2).join(", ")}</div>
+                  </td>
+                  <td className="px-4 py-3 text-muted">
+                    <div className="text-ink">{clip(entry.v2?.cardPreviews?.[0], 140)}</div>
+                    {entry.legacy?.memoryBriefPreview && (
+                      <div className="mt-1">{clip(entry.legacy.memoryBriefPreview, 120)}</div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {recallAudit.length === 0 && (
+                <tr>
+                  <td className="px-4 py-8 text-center text-sm text-muted" colSpan={5}>
+                    暂无 recall audit
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
 

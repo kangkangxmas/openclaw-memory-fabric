@@ -27,6 +27,7 @@ export default defineConfig({
       "/federation": "http://127.0.0.1:7811",
       "/lifecycle": "http://127.0.0.1:7811",
       "/batch": "http://127.0.0.1:7811",
+      "/v2": "http://127.0.0.1:7811",
     },
   },
 });

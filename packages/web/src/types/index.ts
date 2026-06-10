@@ -217,6 +217,32 @@ export interface V2RecallPlanResponse {
   relations?: V2Relation[];
 }
 
+export interface V2RecallAuditEntry {
+  auditId: string;
+  agentId?: string;
+  projectId?: string;
+  query: string;
+  mode: "off" | "shadow" | "v2-recall" | "v2-write" | string;
+  legacy?: {
+    sourceCount?: number;
+    budgetUsed?: number;
+    memoryBriefChars?: number;
+    sources?: string[];
+    memoryBriefPreview?: string;
+  };
+  v2?: {
+    intent?: string;
+    cardCount?: number;
+    evidenceCount?: number;
+    renderedChars?: number;
+    executionTimeMs?: number;
+    memoryIds?: string[];
+    evidenceRefs?: string[];
+    cardPreviews?: string[];
+  };
+  createdAt: string;
+}
+
 export interface V2TraceResponse {
   ok: boolean;
   memoryId: string;
@@ -367,7 +393,10 @@ export interface V2GrayStatus {
     count: number;
     lastAt?: string;
     avgV2CardCount: number;
+    avgV2EvidenceCount: number;
+    avgV2RenderedChars: number;
     avgLegacySourceCount: number;
+    avgLegacyMemoryBriefChars: number;
   };
   bench: V2BenchReport | null;
   readiness: {

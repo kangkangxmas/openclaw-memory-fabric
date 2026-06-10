@@ -472,7 +472,22 @@ describe("Memory Fabric V2", () => {
         projectId: "openclaw",
         query: "Hy-Memory 运行时依赖",
         mode: "v2-recall",
-        v2: { intent: "decision_history", cardCount: 1 },
+        legacy: {
+          sourceCount: 2,
+          budgetUsed: 120,
+          memoryBriefChars: 240,
+          sources: ["openviking:private", "carrier:self-model.md"],
+          memoryBriefPreview: "legacy brief preview",
+        },
+        v2: {
+          intent: "decision_history",
+          cardCount: 1,
+          evidenceCount: 2,
+          renderedChars: 180,
+          memoryIds: ["mem-1"],
+          evidenceRefs: ["evt-1", "evt-2"],
+          cardPreviews: ["Memory Fabric v2 自研，不直接接入 Hy-Memory。"],
+        },
       },
     });
     expect(auditRes.statusCode).toBe(200);
@@ -483,6 +498,18 @@ describe("Memory Fabric V2", () => {
     });
     const auditListBody = JSON.parse(auditListRes.body);
     expect(auditListBody.count).toBe(1);
+    expect(auditListBody.entries[0].legacy.sources).toContain("openviking:private");
+    expect(auditListBody.entries[0].v2.memoryIds).toEqual(["mem-1"]);
+    expect(auditListBody.entries[0].v2.evidenceRefs).toEqual(["evt-1", "evt-2"]);
+
+    const grayStatusAfterAuditRes = await app.inject({
+      method: "GET",
+      url: "/v2/gray/status?agentId=development&projectId=openclaw",
+    });
+    const grayStatusAfterAuditBody = JSON.parse(grayStatusAfterAuditRes.body);
+    expect(grayStatusAfterAuditBody.recallAudit.avgV2EvidenceCount).toBe(2);
+    expect(grayStatusAfterAuditBody.recallAudit.avgV2RenderedChars).toBe(180);
+    expect(grayStatusAfterAuditBody.recallAudit.avgLegacyMemoryBriefChars).toBe(240);
 
     const workerStopRes = await app.inject({ method: "POST", url: "/v2/consolidation/worker/stop", payload: {} });
     const workerStopBody = JSON.parse(workerStopRes.body);

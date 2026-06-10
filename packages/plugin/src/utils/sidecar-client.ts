@@ -59,6 +59,8 @@ export interface RecallAuditRequest {
     sourceCount?: number;
     budgetUsed?: number;
     memoryBriefChars?: number;
+    sources?: string[];
+    memoryBriefPreview?: string;
   };
   v2?: {
     intent?: string;
@@ -66,6 +68,9 @@ export interface RecallAuditRequest {
     evidenceCount?: number;
     renderedChars?: number;
     executionTimeMs?: number;
+    memoryIds?: string[];
+    evidenceRefs?: string[];
+    cardPreviews?: string[];
   };
 }
 

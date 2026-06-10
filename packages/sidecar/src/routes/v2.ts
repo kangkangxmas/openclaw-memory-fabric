@@ -316,8 +316,23 @@ export function registerV2Routes(
       projectId?: string;
       query: string;
       mode: string;
-      legacy?: { sourceCount?: number; budgetUsed?: number; memoryBriefChars?: number };
-      v2?: { intent?: string; cardCount?: number; evidenceCount?: number; renderedChars?: number; executionTimeMs?: number };
+      legacy?: {
+        sourceCount?: number;
+        budgetUsed?: number;
+        memoryBriefChars?: number;
+        sources?: string[];
+        memoryBriefPreview?: string;
+      };
+      v2?: {
+        intent?: string;
+        cardCount?: number;
+        evidenceCount?: number;
+        renderedChars?: number;
+        executionTimeMs?: number;
+        memoryIds?: string[];
+        evidenceRefs?: string[];
+        cardPreviews?: string[];
+      };
     };
   }>("/v2/recall/audit", async (request) => {
     const entry = await recallAudit.append(request.body);
@@ -608,7 +623,10 @@ export function registerV2Routes(
       recallAudit.list({ agentId, projectId, limit: 50 }),
     ]);
     const v2CardCounts = auditEntries.map((entry) => entry.v2?.cardCount ?? 0);
+    const v2EvidenceCounts = auditEntries.map((entry) => entry.v2?.evidenceCount ?? 0);
+    const v2RenderedChars = auditEntries.map((entry) => entry.v2?.renderedChars ?? 0);
     const legacySourceCounts = auditEntries.map((entry) => entry.legacy?.sourceCount ?? 0);
+    const legacyBriefChars = auditEntries.map((entry) => entry.legacy?.memoryBriefChars ?? 0);
     const avg = (values: number[]): number => values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 
     return {
@@ -622,7 +640,10 @@ export function registerV2Routes(
         count: auditEntries.length,
         lastAt: auditEntries[0]?.createdAt,
         avgV2CardCount: avg(v2CardCounts),
+        avgV2EvidenceCount: avg(v2EvidenceCounts),
+        avgV2RenderedChars: avg(v2RenderedChars),
         avgLegacySourceCount: avg(legacySourceCounts),
+        avgLegacyMemoryBriefChars: avg(legacyBriefChars),
       },
       bench: latestBench,
       readiness: {

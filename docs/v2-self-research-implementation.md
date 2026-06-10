@@ -63,7 +63,7 @@ flowchart LR
 - `MemoryCardPackager`：把稳定记忆压缩为 evidence-backed cards，支持去重、token budget、证据摘要、冲突/过期标记。
 - `CarrierProjectionEngine`：把结构化记忆审计为 Carrier Markdown 投影，支持 drift audit、apply、rollback 和 history。
 - `V2RelationGraphService`：记录 `DECIDES`、`IMPLEMENTS`、`SUPERSEDES`、`CAUSES`、`VALIDATES`、`CONSTRAINS` 关系边。
-- `RecallAuditLogService`：记录 v2-recall 灰度期间 legacy recall 与 v2 recall 的对照日志。
+- `RecallAuditLogService`：记录 v2-recall 灰度期间 legacy recall 与 v2 recall 的对照日志，包含 legacy sources/brief preview、v2 memory ids、evidence refs 和 card previews。
 - `MemoryBenchRunner`：内置 30+ 个 v0 用例，记录 Recall@5、Injection Precision、Stale Rate、Source Coverage、平均注入长度、P95 latency，并持久化 latest report。
 - `MemoryBenchFixtureSeeder`：把默认、自定义或持久化 fixture cases 可重复写入 L0 event、L1 candidate 并触发 promotion；用于真实灰度前建立稳定 fixture。
 

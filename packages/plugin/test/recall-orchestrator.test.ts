@@ -233,6 +233,16 @@ describe("RecallOrchestrator.execute()", () => {
       assert.equal(legacyRecallCalled, true);
       assert.ok(auditPayload);
       assert.equal((auditPayload as { mode?: string }).mode, "v2-recall");
+      assert.deepEqual((auditPayload as { legacy?: { sources?: string[] } }).legacy?.sources, ["legacy"]);
+      assert.equal(
+        (auditPayload as { legacy?: { memoryBriefPreview?: string } }).legacy?.memoryBriefPreview,
+        "legacy"
+      );
+      assert.deepEqual((auditPayload as { v2?: { memoryIds?: string[] } }).v2?.memoryIds, ["mem-1"]);
+      assert.deepEqual((auditPayload as { v2?: { evidenceRefs?: string[] } }).v2?.evidenceRefs, ["evt-1"]);
+      assert.deepEqual((auditPayload as { v2?: { cardPreviews?: string[] } }).v2?.cardPreviews, [
+        "Memory Fabric v2 uses self-researched memory cards.",
+      ]);
       assert.ok(result.brief.includes("Memory Cards"));
       assert.ok(result.sources.includes("v2:recall-plan:decision_history"));
       assert.ok(result.sources.includes("event:evt-1"));
