@@ -428,10 +428,12 @@ export class MemoryCoreV2 {
       }
     }
 
-    // Sort by recency
-    results.sort((a, b) =>
-      new Date(b.timeline.createdAt).getTime() - new Date(a.timeline.createdAt).getTime()
-    );
+    // Sort by recency for non-text queries. Text queries preserve index/keyword relevance order.
+    if (!opts.text?.trim()) {
+      results.sort((a, b) =>
+        new Date(b.timeline.createdAt).getTime() - new Date(a.timeline.createdAt).getTime()
+      );
+    }
 
     // Pagination
     const total = results.length;

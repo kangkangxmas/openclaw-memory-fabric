@@ -48,6 +48,36 @@ describe("MemoryIndex", () => {
     expect(results).not.toContain("3");
   });
 
+  it("should rank partial multi-token text matches by relevance", () => {
+    const index = new MemoryIndex();
+    const entries = [
+      createEntry("1", "OpenViking mode local configuration", "fact", "agent-1"),
+      createEntry("2", "OpenViking storage migration", "fact", "agent-1"),
+      createEntry("3", "Carrier projection rollback", "decision", "agent-1"),
+    ];
+
+    index.build(entries);
+
+    const results = index.searchText("openviking local");
+    expect(results[0]).toBe("1");
+    expect(results).toContain("2");
+    expect(results).not.toContain("3");
+  });
+
+  it("should search Chinese text with CJK bigrams", () => {
+    const index = new MemoryIndex();
+    const entries = [
+      createEntry("1", "L0 事件账本需要记录 event_id、content_hash、source_uri", "fact", "agent-1"),
+      createEntry("2", "测试配置里的 openviking.mode 应该是 local", "fact", "agent-1"),
+    ];
+
+    index.build(entries);
+
+    const results = index.searchText("L0 事件账本需要记录哪些字段");
+    expect(results[0]).toBe("1");
+    expect(results).not.toContain("2");
+  });
+
   it("should filter by type", () => {
     const index = new MemoryIndex();
     const entries = [

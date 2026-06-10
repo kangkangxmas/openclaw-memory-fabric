@@ -77,6 +77,21 @@ describe("Memory Fabric V2", () => {
       sourceRefs: [event.eventId],
       confidence: 0.9,
     });
+    const distractorEvent = await ledger.append({
+      agentId: "development",
+      projectId: "openclaw",
+      sourceType: "session",
+      summary: "v2 card injection decision",
+      content: "before_prompt_build 只注入 memory cards，不再直接注入大段 Carrier。",
+    });
+    await candidateStore.create({
+      agentId: "development",
+      projectId: "openclaw",
+      type: "decision",
+      content: "before_prompt_build 只注入 memory cards，不再直接注入大段 Carrier。",
+      sourceRefs: [distractorEvent.eventId],
+      confidence: 0.9,
+    });
 
     const consolidated = await consolidator.run({ agentId: "development", projectId: "openclaw" });
     const recall = await planner.recall({
@@ -86,10 +101,12 @@ describe("Memory Fabric V2", () => {
       limit: 5,
     });
 
-    expect(consolidated.promoted).toBe(1);
+    expect(consolidated.promoted).toBe(2);
     expect(recall.plan.intent).toBe("decision_history");
     expect(recall.cards.length).toBeGreaterThan(0);
     expect(recall.cards[0].evidence).toContain(event.eventId);
+    expect(recall.cards[0].content).toContain("Hy-Memory");
+    expect(recall.cards.some((card) => card.evidence.includes(distractorEvent.eventId))).toBe(false);
     expect(recall.rendered).toContain("Memory Cards");
   });
 

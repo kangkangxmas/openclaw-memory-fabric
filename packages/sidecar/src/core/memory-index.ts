@@ -54,13 +54,29 @@ const DEFAULT_CONFIG: IndexConfig = {
 // ---------------------------------------------------------------------------
 
 function tokenize(text: string, config: IndexConfig): string[] {
-  const tokens = text
-    .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
-    .split(/\s+/)
-    .filter((t) => t.length >= config.minTokenLength)
-    .filter((t) => !config.stopWords.has(t));
-  return [...new Set(tokens)]; // deduplicate
+  const normalized = text.toLowerCase();
+  const tokens: string[] = [];
+  const chunks = normalized.match(/[\p{L}\p{N}_]+/gu) ?? [];
+
+  for (const chunk of chunks) {
+    if (chunk.length >= config.minTokenLength && !config.stopWords.has(chunk)) {
+      tokens.push(chunk);
+    }
+    const cjkRuns = chunk.match(/[\p{Script=Han}]+/gu) ?? [];
+    for (const run of cjkRuns) {
+      for (let i = 0; i < run.length - 1; i++) {
+        tokens.push(run.slice(i, i + 2));
+      }
+    }
+  }
+
+  return [
+    ...new Set(
+      tokens
+        .filter((t) => t.length >= config.minTokenLength)
+        .filter((t) => !config.stopWords.has(t))
+    ),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -208,21 +224,22 @@ export class MemoryIndex {
     const tokens = tokenize(query, this.config);
     if (tokens.length === 0) return [];
 
-    // Intersection of all token matches
-    let result: Set<string> | undefined;
+    const scores = new Map<string, number>();
     for (const token of tokens) {
       const matches = this.textIndex.get(token);
-      if (!matches) return [];
-      if (!result) {
-        result = new Set(matches);
-      } else {
-        for (const id of result) {
-          if (!matches.has(id)) result.delete(id);
-        }
+      if (!matches) continue;
+      for (const id of matches) {
+        scores.set(id, (scores.get(id) ?? 0) + 1);
       }
     }
 
-    return result ? Array.from(result) : [];
+    return [...scores.entries()]
+      .sort((a, b) => {
+        const scoreDelta = b[1] - a[1];
+        if (scoreDelta !== 0) return scoreDelta;
+        return a[0].localeCompare(b[0]);
+      })
+      .map(([id]) => id);
   }
 
   /** Filter by type. */

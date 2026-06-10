@@ -45,6 +45,36 @@ function temporalBoost(entry: MemoryEntryV2): number {
   return Math.max(0, 1 - days / 180);
 }
 
+function lexicalTokens(text: string): string[] {
+  const normalized = text.toLowerCase();
+  const tokens: string[] = [];
+  const chunks = normalized.match(/[\p{L}\p{N}_]+/gu) ?? [];
+  for (const chunk of chunks) {
+    if (chunk.length >= 2) tokens.push(chunk);
+    const cjkRuns = chunk.match(/[\p{Script=Han}]+/gu) ?? [];
+    for (const run of cjkRuns) {
+      for (let i = 0; i < run.length - 1; i++) {
+        tokens.push(run.slice(i, i + 2));
+      }
+    }
+  }
+  return [...new Set(tokens.filter((token) => token.length >= 2))];
+}
+
+function lexicalRelevance(entry: MemoryEntryV2, query: string): number {
+  const tokens = lexicalTokens(query);
+  if (tokens.length === 0) return 0;
+  const text = `${entry.content} ${entry.metadata.tags?.join(" ") ?? ""}`.toLowerCase();
+  let score = 0;
+  for (const token of tokens) {
+    if (text.includes(token)) {
+      score += token.length > 2 ? 1 : 0.75;
+    }
+  }
+  if (text.includes(query.toLowerCase())) score += 2;
+  return Math.min(1, score / Math.max(1, tokens.length * 0.7));
+}
+
 export class RetrievalPlanner {
   private readonly packager = new MemoryCardPackager();
 
@@ -130,10 +160,10 @@ export class RetrievalPlanner {
           })
         : [];
 
-    const scores = new Map<string, { entry: MemoryEntryV2; score: number }>();
+    const scores = new Map<string, { entry: MemoryEntryV2; score: number; lexical: number }>();
     const add = (entries: MemoryEntryV2[], weight: number): void => {
       entries.forEach((entry, rank) => {
-        const current = scores.get(entry.id) ?? { entry, score: 0 };
+        const current = scores.get(entry.id) ?? { entry, score: 0, lexical: lexicalRelevance(entry, plan.query) };
         current.score += rrf(rank) * weight;
         scores.set(entry.id, current);
       });
@@ -144,6 +174,7 @@ export class RetrievalPlanner {
     add(temporal.entries, plan.weights.temporal);
 
     for (const current of scores.values()) {
+      current.score += current.lexical * 0.85;
       current.score += qualityScore(current.entry) * plan.weights.sourceQuality;
       current.score += temporalBoost(current.entry) * plan.weights.temporal;
       if (plan.preferredTypes.includes(current.entry.type)) current.score += 0.05;
@@ -153,10 +184,13 @@ export class RetrievalPlanner {
       if (relationCount > 0) current.score += Math.min(0.2, relationCount * 0.04) * plan.weights.graph;
     }
 
-    const entries = Array.from(scores.values())
-      .sort((a, b) => b.score - a.score)
-      .slice(0, input.limit ?? 8)
-      .map((item) => item.entry);
+    const ranked = Array.from(scores.values()).sort((a, b) => b.score - a.score);
+    const topLexical = ranked[0]?.lexical ?? 0;
+    const focused =
+      topLexical >= 0.35
+        ? ranked.filter((item) => item.lexical >= Math.max(0.35, topLexical * 0.55))
+        : ranked;
+    const entries = focused.slice(0, input.limit ?? 8).map((item) => item.entry);
     const cards = this.packager.package(entries, { limit: input.limit ?? 8, tokenBudget: plan.intent === "task_continuation" ? 900 : 700 });
 
     return {
