@@ -6,14 +6,7 @@ import type { ExperienceService, PostCommitContext } from "../services/experienc
 import type { EventLedgerService } from "../services/event-ledger-service.js";
 import type { AtomicMemoryCandidate, AtomicMemoryStore } from "../services/atomic-memory-store.js";
 import type { MemoryType } from "../models/schema-v2.js";
-
-type V2Mode = "off" | "shadow" | "v2-recall" | "v2-write";
-
-function v2Mode(): V2Mode {
-  const raw = process.env.MEMORY_FABRIC_V2_MODE;
-  if (raw === "off" || raw === "shadow" || raw === "v2-recall" || raw === "v2-write") return raw;
-  return "shadow";
-}
+import { resolveV2Mode } from "../utils/v2-mode.js";
 
 function collectCandidates(body: CommitRequest): Array<{ type: MemoryType; content: string; tags: string[] }> {
   const groups: Array<{ type: MemoryType; values?: string[]; tag: string }> = [
@@ -115,7 +108,7 @@ export function registerCommitRoute(
       }
     },
     async (request): Promise<CommitResponse> => {
-      const mode = v2Mode();
+      const mode = resolveV2Mode(request.body.agentId);
       const v2ServicesReady = !!eventLedger && !!atomicStore;
       let v2: CommitResponse["v2"] =
         mode === "off"

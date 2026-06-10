@@ -421,6 +421,10 @@ React 18 + Vite + TypeScript + Tailwind CSS 构建的 SPA，通过 `@fastify/sta
 | `OPENVIKING_BASE_PATH` | OpenViking 数据根目录 | `~/.openviking/data/viking/openclaw-personal` |
 | `CARRIERS_ROOT` | Carrier 文件根目录 | `~/.memory-fabric/carriers` |
 | `MEMORY_FABRIC_V2_MODE` | v2 灰度模式：`off`、`shadow`、`v2-recall`、`v2-write` | `v2-recall` |
+| `MEMORY_FABRIC_V2_WRITE_AGENT_IDS` | 逗号分隔的 v2-write 单 Agent allowlist，优先级高于全局模式 | `product` |
+| `MEMORY_FABRIC_V2_RECALL_AGENT_IDS` | 逗号分隔的 v2-recall 单 Agent allowlist | `development,product` |
+| `MEMORY_FABRIC_V2_SHADOW_AGENT_IDS` | 逗号分隔的 shadow 单 Agent 回退 allowlist | `product` |
+| `MEMORY_FABRIC_V2_OFF_AGENT_IDS` | 逗号分隔的 off 单 Agent 紧急关闭 allowlist，优先级最高 | `product` |
 | `MEMORY_FABRIC_CONSOLIDATION_WORKER` | 是否随 sidecar 自动启动巩固 worker；默认关闭，`auto/on/true/1` 开启 | `auto` |
 | `MEMORY_FABRIC_CONSOLIDATION_AGENT_ID` | 自动 worker 可选 Agent 过滤 | `development` |
 | `MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID` | 自动 worker 可选 Project 过滤 | `openclaw-memory-fabric` |

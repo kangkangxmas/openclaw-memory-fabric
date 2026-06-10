@@ -29,6 +29,25 @@ async function waitForCandidates(
   return latest;
 }
 
+const v2ModeEnvKeys = [
+  "MEMORY_FABRIC_V2_MODE",
+  "MEMORY_FABRIC_V2_OFF_AGENT_IDS",
+  "MEMORY_FABRIC_V2_SHADOW_AGENT_IDS",
+  "MEMORY_FABRIC_V2_RECALL_AGENT_IDS",
+  "MEMORY_FABRIC_V2_WRITE_AGENT_IDS",
+] as const;
+
+function snapshotEnv(keys: readonly string[]): Record<string, string | undefined> {
+  return Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+}
+
+function restoreEnv(snapshot: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
 describe("Memory Fabric V2", () => {
   let tmpRoot: string;
   let cfg: SidecarConfig["openviking"];
@@ -308,10 +327,15 @@ describe("Memory Fabric V2", () => {
   });
 
   it("exposes commit mode preflight status for off, shadow, v2-recall, and v2-write", async () => {
-    const previousMode = process.env.MEMORY_FABRIC_V2_MODE;
+    const previousEnv = snapshotEnv(v2ModeEnvKeys);
     const modes = ["off", "shadow", "v2-recall", "v2-write"] as const;
 
     try {
+      delete process.env.MEMORY_FABRIC_V2_OFF_AGENT_IDS;
+      delete process.env.MEMORY_FABRIC_V2_SHADOW_AGENT_IDS;
+      delete process.env.MEMORY_FABRIC_V2_RECALL_AGENT_IDS;
+      delete process.env.MEMORY_FABRIC_V2_WRITE_AGENT_IDS;
+
       for (const mode of modes) {
         process.env.MEMORY_FABRIC_V2_MODE = mode;
         const modeRoot = await mkdtemp(join(tmpRoot, `commit-${mode}-`));
@@ -378,14 +402,101 @@ describe("Memory Fabric V2", () => {
         await app.close();
       }
     } finally {
-      if (previousMode === undefined) delete process.env.MEMORY_FABRIC_V2_MODE;
-      else process.env.MEMORY_FABRIC_V2_MODE = previousMode;
+      restoreEnv(previousEnv);
+    }
+  });
+
+  it("allows per-agent v2-write canary while keeping the global mode on v2-recall", async () => {
+    const previousEnv = snapshotEnv(v2ModeEnvKeys);
+    const modeRoot = await mkdtemp(join(tmpRoot, "commit-agent-canary-"));
+    const modeCfg = {
+      mode: "local" as const,
+      basePath: join(modeRoot, "openviking"),
+      targetRoot: "viking://org/test",
+    };
+    const openviking = new OpenVikingService(modeCfg);
+    const ledger = new EventLedgerService(modeCfg);
+    const candidates = new AtomicMemoryStore(modeCfg);
+    const app = Fastify({ logger: false });
+
+    try {
+      process.env.MEMORY_FABRIC_V2_MODE = "v2-recall";
+      delete process.env.MEMORY_FABRIC_V2_OFF_AGENT_IDS;
+      delete process.env.MEMORY_FABRIC_V2_SHADOW_AGENT_IDS;
+      delete process.env.MEMORY_FABRIC_V2_RECALL_AGENT_IDS;
+      process.env.MEMORY_FABRIC_V2_WRITE_AGENT_IDS = "product";
+
+      registerCommitRoute(app, openviking, undefined, ledger, candidates);
+      registerV2Routes(app, modeCfg);
+      await app.ready();
+
+      const productFact = "product canary fact writes v2 first";
+      const productRes = await app.inject({
+        method: "POST",
+        url: "/commit",
+        payload: {
+          agentId: "product",
+          projectId: "Product",
+          facts: [productFact],
+          decisions: ["product canary decision keeps legacy fallback"],
+        },
+      });
+      const productBody = JSON.parse(productRes.body);
+
+      expect(productRes.statusCode).toBe(200);
+      expect(productBody.v2.mode).toBe("v2-write");
+      expect(productBody.v2.status).toBe("written");
+      expect(productBody.v2.legacyStatus).toBe("written");
+      expect(productBody.v2.sourceRefs).toEqual([productBody.v2.eventId]);
+      expect(
+        await waitForCandidates(candidates, {
+          agentId: "product",
+          projectId: "Product",
+          expectedContent: productFact,
+        })
+      ).toHaveLength(2);
+
+      const developmentRes = await app.inject({
+        method: "POST",
+        url: "/commit",
+        payload: {
+          agentId: "development",
+          projectId: "openclaw",
+          facts: ["development keeps global v2-recall"],
+        },
+      });
+      const developmentBody = JSON.parse(developmentRes.body);
+      expect(developmentBody.v2.mode).toBe("v2-recall");
+      expect(developmentBody.v2.status).toBe("queued");
+
+      const productStatusRes = await app.inject({
+        method: "GET",
+        url: "/v2/gray/status?agentId=product&projectId=Product",
+      });
+      const productStatusBody = JSON.parse(productStatusRes.body);
+      expect(productStatusBody.mode).toBe("v2-write");
+      expect(productStatusBody.readiness.modeReady).toBe(true);
+
+      const developmentStatusRes = await app.inject({
+        method: "GET",
+        url: "/v2/gray/status?agentId=development&projectId=openclaw",
+      });
+      const developmentStatusBody = JSON.parse(developmentStatusRes.body);
+      expect(developmentStatusBody.mode).toBe("v2-recall");
+      expect(developmentStatusBody.readiness.modeReady).toBe(true);
+    } finally {
+      await app.close();
+      restoreEnv(previousEnv);
     }
   });
 
   it("keeps v2-write commits successful when legacy fallback write fails", async () => {
-    const previousMode = process.env.MEMORY_FABRIC_V2_MODE;
+    const previousEnv = snapshotEnv(v2ModeEnvKeys);
     process.env.MEMORY_FABRIC_V2_MODE = "v2-write";
+    delete process.env.MEMORY_FABRIC_V2_OFF_AGENT_IDS;
+    delete process.env.MEMORY_FABRIC_V2_SHADOW_AGENT_IDS;
+    delete process.env.MEMORY_FABRIC_V2_RECALL_AGENT_IDS;
+    delete process.env.MEMORY_FABRIC_V2_WRITE_AGENT_IDS;
     const ledger = new EventLedgerService(cfg);
     const candidates = new AtomicMemoryStore(cfg);
     const app = Fastify({ logger: false });
@@ -419,8 +530,7 @@ describe("Memory Fabric V2", () => {
       expect(writtenCandidates[0].sourceRefs).toEqual([body.v2.eventId]);
     } finally {
       await app.close();
-      if (previousMode === undefined) delete process.env.MEMORY_FABRIC_V2_MODE;
-      else process.env.MEMORY_FABRIC_V2_MODE = previousMode;
+      restoreEnv(previousEnv);
     }
   });
 

@@ -21,6 +21,7 @@ import { MemoryBenchFixtureSeeder } from "../services/memory-bench-fixture-seede
 import { V2RelationGraphService, type V2RelationType } from "../services/v2-relation-graph-service.js";
 import { RecallAuditLogService } from "../services/recall-audit-log-service.js";
 import type { CarrierRepository } from "../services/carrier-service.js";
+import { isV2RecallReady, resolveV2Mode } from "../utils/v2-mode.js";
 
 // ---------------------------------------------------------------------------
 // Route Registration
@@ -79,11 +80,6 @@ export function registerV2Routes(
   const shouldAutoStartWorker = (): boolean => {
     const raw = process.env.MEMORY_FABRIC_CONSOLIDATION_WORKER?.toLowerCase();
     return raw === "auto" || raw === "on" || raw === "true" || raw === "1";
-  };
-  const v2Mode = (): "off" | "shadow" | "v2-recall" | "v2-write" => {
-    const raw = process.env.MEMORY_FABRIC_V2_MODE;
-    if (raw === "off" || raw === "shadow" || raw === "v2-recall" || raw === "v2-write") return raw;
-    return "shadow";
   };
 
   if (shouldAutoStartWorker()) {
@@ -650,10 +646,11 @@ export function registerV2Routes(
     const legacySourceCounts = auditEntries.map((entry) => entry.legacy?.sourceCount ?? 0);
     const legacyBriefChars = auditEntries.map((entry) => entry.legacy?.memoryBriefChars ?? 0);
     const avg = (values: number[]): number => values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+    const mode = resolveV2Mode(agentId);
 
     return {
       ok: true,
-      mode: v2Mode(),
+      mode,
       agentId,
       projectId,
       worker: consolidationWorker.status(),
@@ -669,7 +666,7 @@ export function registerV2Routes(
       },
       bench: latestBench,
       readiness: {
-        modeReady: v2Mode() === "v2-recall" || v2Mode() === "v2-write",
+        modeReady: isV2RecallReady(mode),
         sourceCoverageReady: latestBench ? latestBench.sourceCoverage >= 0.98 : false,
         latencyReady: latestBench ? latestBench.p95LatencyMs <= 300 : false,
         candidateQueueHealthy: candidateStats.byStatus.pending < 100 && candidateStats.byStatus.needs_review < 50,

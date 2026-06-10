@@ -109,11 +109,11 @@ pnpm v2:gray-smoke -- \
 
 ### Milestone C：v2-write 预切主
 
-目标：在 `development` Agent 开启 `v2-write`，但保留 legacy 回退。
+目标：先在单个低风险 Agent 开启 `v2-write`，但保留 legacy 回退。当前推荐做法是全局保持 `MEMORY_FABRIC_V2_MODE=v2-recall`，再用 `MEMORY_FABRIC_V2_WRITE_AGENT_IDS=product` 让棱镜（`product` / `Product`）单独进入 v2-first 写入。
 
 步骤：
 - `/commit` 切为 v2-first 时仍保留 legacy JSONL shadow。
-- 每次切换前运行 `pnpm v2:commit-smoke -- --strict`；切到 `v2-write` 后追加 `--require-v2-write`。
+- 每次切换前运行 `pnpm v2:commit-smoke -- --strict`；切到单 Agent `v2-write` 后追加 `--require-v2-write --agent-id product --project-id Product`。
 - ConsolidationWorker 默认启动，但只处理 pending，不自动反复处理 needs_review。
 - Candidate review 必须可清空 blocked 状态。
 - Carrier projection 只由稳定 memories apply，直接 patch 必须有投影所有权标记，且每次 apply 可 rollback。
@@ -127,6 +127,7 @@ pnpm v2:gray-smoke -- \
 回退方式：
 - `MEMORY_FABRIC_V2_MODE=shadow`：恢复 legacy recall 注入，保留 v2 shadow-write。
 - `MEMORY_FABRIC_V2_MODE=off`：关闭 v2 shadow-write。
+- 从 `MEMORY_FABRIC_V2_WRITE_AGENT_IDS` 移除目标 Agent，或设置 `MEMORY_FABRIC_V2_SHADOW_AGENT_IDS=product` / `MEMORY_FABRIC_V2_OFF_AGENT_IDS=product`，可只回退棱镜。
 - 回滚最新 Carrier projection：`POST /v2/carriers/projection/rollback`。
 
 ### Milestone D：多 Agent 扩展

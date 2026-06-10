@@ -69,7 +69,7 @@ Base URL: `http://127.0.0.1:7811`
 }
 ```
 
-> `toolCalls` 和 `turnCount` 用于触发经验蒸馏的条件判断。`v2` 字段为可选兼容扩展：`off` 不写 v2；`shadow` 和 `v2-recall` 返回 `queued` 并异步写 L0/L1；`v2-write` 先同步写 L0 event 和 L1 candidates，再写 legacy JSONL 作为 fallback。
+> `toolCalls` 和 `turnCount` 用于触发经验蒸馏的条件判断。`v2` 字段为可选兼容扩展：`off` 不写 v2；`shadow` 和 `v2-recall` 返回 `queued` 并异步写 L0/L1；`v2-write` 先同步写 L0 event 和 L1 candidates，再写 legacy JSONL 作为 fallback。sidecar 会按 `agentId` 解析最终模式：全局模式来自 `MEMORY_FABRIC_V2_MODE`，单 Agent 灰度可通过 `MEMORY_FABRIC_V2_WRITE_AGENT_IDS`、`MEMORY_FABRIC_V2_RECALL_AGENT_IDS`、`MEMORY_FABRIC_V2_SHADOW_AGENT_IDS`、`MEMORY_FABRIC_V2_OFF_AGENT_IDS` 覆盖。
 
 ---
 
@@ -245,7 +245,7 @@ Query:
 
 Response 包含：
 
-- `mode`：`MEMORY_FABRIC_V2_MODE` 当前值，默认 `shadow`
+- `mode`：当前 `agentId` 的有效 v2 模式。默认来自 `MEMORY_FABRIC_V2_MODE`，可被 per-Agent allowlist 覆盖。
 - `worker`：ConsolidationWorker 状态
 - `candidateStats`：candidate queue 总量、状态和类型分布
 - `recallAudit`：最近 audit 数量、最近时间、v2 cards/evidence/rendered chars 与 legacy sources/brief chars 均值
