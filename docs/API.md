@@ -399,6 +399,38 @@ Response:
 
 读取最新一次 Bench report。
 
+### v2 gray smoke 脚本
+
+仓库提供 `pnpm v2:gray-smoke` 串联灰度检查流程：
+
+1. `GET /health`
+2. 可选 `POST /v2/bench/fixtures`
+3. `GET /v2/bench/fixtures`
+4. `POST /v2/bench/seed`
+5. `POST /v2/bench/run`
+6. `GET /v2/gray/status`
+
+示例：
+
+```bash
+pnpm v2:gray-smoke -- \
+  --base-url http://127.0.0.1:7811 \
+  --agent-id development \
+  --project-id openclaw-memory-fabric
+```
+
+使用真实 fixture 文件并严格检查指标：
+
+```bash
+pnpm v2:gray-smoke -- \
+  --fixture-file ./fixtures/development-bench.json \
+  --fixture-mode append \
+  --strict \
+  --require-v2-mode
+```
+
+默认只检查链路可用性；`--strict` 才会按 Bench 验收目标让命令返回非零状态码。
+
 ---
 
 ## GET /patterns?agentId={agentId}
