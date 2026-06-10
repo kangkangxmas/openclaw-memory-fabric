@@ -10,6 +10,7 @@ import { MemoryConsolidator } from "../src/services/memory-consolidator.js";
 import { MemoryCoreV2 } from "../src/core/memory-core-v2.js";
 import { RetrievalPlanner } from "../src/services/retrieval-planner.js";
 import { CarrierRepository } from "../src/services/carrier-service.js";
+import { CarrierProjectionEngine } from "../src/services/carrier-projection-engine.js";
 import { registerV2Routes } from "../src/routes/v2.js";
 
 describe("Memory Fabric V2", () => {
@@ -195,6 +196,55 @@ describe("Memory Fabric V2", () => {
 
     expect(approved?.tags).toContain("manual_review_approved");
     expect(promoted.promoted).toBe(1);
+  });
+
+  it("enforces carrier projection ownership before applying direct patches", async () => {
+    const carriers = new CarrierRepository(join(tmpRoot, "carriers"));
+    const projection = new CarrierProjectionEngine(carriers, cfg);
+
+    const blocked = await projection.apply({
+      agentId: "development",
+      projectId: "openclaw",
+      patches: [
+        {
+          filename: "self-model.md",
+          content: "# Self Model\n\n## Understood\n- unowned profile write\n",
+        },
+        {
+          filename: "unknown.md",
+          content: "<!-- memory-fabric projection:v2.0 memory:mem-x -->\nunknown",
+        },
+      ],
+    });
+
+    expect(blocked.merged).toEqual([]);
+    expect(blocked.skipped).toContain("self-model.md (missing memory-fabric projection marker)");
+    expect(blocked.skipped).toContain("unknown.md (outside projection schema whitelist)");
+
+    const core = new MemoryCoreV2(cfg);
+    const memory = await core.create({
+      agentId: "development",
+      projectId: "openclaw",
+      scope: "project",
+      type: "profile",
+      content: "The development agent should prefer evidence-backed memory cards.",
+      sourceRefs: ["evt-profile"],
+      quality: { specificity: 0.9, actionability: 0.85, stability: 0.85, sourceCoverage: 1 },
+    });
+    const applied = await projection.apply({
+      agentId: "development",
+      projectId: "openclaw",
+      entries: [memory],
+    });
+    const [selfModel] = await carriers.read({
+      agentId: "development",
+      projectId: "openclaw",
+      files: ["self-model.md"],
+    });
+
+    expect(applied.merged).toContain("self-model.md");
+    expect(selfModel.content).toContain("The development agent should prefer evidence-backed memory cards.");
+    expect(selfModel.content).toContain(`memory:${memory.id}`);
   });
 
   it("exposes v2 evidence, consolidation, trace, drift, and bench routes", async () => {

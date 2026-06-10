@@ -297,6 +297,8 @@ Query:
 
 将稳定结构化记忆应用到 Carrier 投影。apply 前会记录 rollback snapshot。
 
+公开 API 只接受 `agentId`、`projectId`、`memoryIds` 和 `limit`，不接受任意 Markdown patch。服务内部直接应用 patch 时也必须满足 Carrier 投影白名单并携带 `<!-- memory-fabric projection:v2.0 memory:... -->` 所有权标记；不满足条件的 patch 会出现在响应 `projection.skipped` 中。
+
 ```json
 {
   "agentId": "development",

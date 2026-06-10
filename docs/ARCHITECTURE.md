@@ -37,7 +37,7 @@ v2 的关键边界：
 - L1 candidate queue 是低风险写入入口；没有 `sourceRefs` 的内容只能停留在 `needs_review` 或 `rejected`。
 - `MemoryConsolidator` 负责 promotion、去重、冲突检测、`supersedes`、`validUntil`、质量评分和 relation graph 写入。
 - `RetrievalPlanner` 负责可解释检索计划和 Hybrid RRF，`MemoryCardPackager` 只向 prompt 注入 evidence-backed memory cards。
-- Carrier 是结构化记忆的 Markdown 投影，不再作为唯一事实源；projection apply 前记录 rollback patch，可审计和回滚。
+- Carrier 是结构化记忆的 Markdown 投影，不再作为唯一事实源；projection apply 前记录 rollback patch，并要求 patch 属于 schema whitelist 且带 `memory-fabric projection` 所有权标记，可审计和回滚。
 - `V2RelationGraphService` 从共现图升级为语义关系图，支持 `DECIDES`、`IMPLEMENTS`、`SUPERSEDES`、`CAUSES`、`VALIDATES`、`CONSTRAINS`。
 - `MemoryBenchFixtureSeeder` 负责把真实或默认 bench cases 灌入 L0/L1/stable memory；`GET /v2/gray/status` 把 mode、worker、candidate queue、recall audit 和 latest bench 汇总为灰度决策面板。
 

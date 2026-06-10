@@ -101,7 +101,7 @@ flowchart LR
 - `execution-journal.md`：接收 L2 episode、todo、unresolved。
 - `entities-glossary.md`：接收 L1 entity 和 Graphify 后续关系摘要。
 
-Carrier 是结构化记忆的 Markdown 投影，不再作为唯一事实源。
+Carrier 是结构化记忆的 Markdown 投影，不再作为唯一事实源。投影 patch 必须属于固定 schema whitelist，并带 `memory-fabric projection:v2.0 memory:<id>` 所有权标记；不满足门禁的 patch 会被跳过并记录在 projection history 的 `skipped` 字段。
 
 ## 5. Bench v0 验收目标
 

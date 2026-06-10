@@ -29,6 +29,7 @@
 - `CarrierProjectionEngine`：支持 drift audit、apply、rollback、history；apply 前记录 rollback snapshot。
 - `CarrierRepository.replace`：提供 rollback 精确恢复能力。
 - 投影白名单：只允许 `self-model.md`、`decision-log.md`、`execution-journal.md`、`entities-glossary.md`。
+- 投影所有权：直接 patch 必须带 `memory-fabric projection:v2.0 memory:<id>` 标记；API apply 只从稳定 memory 生成 patch，非法 patch 进入 `skipped`。
 - `self-model.md`：只接受高质量、带 sourceRefs 的 profile/intent，不接受低置信 preference。
 
 ### Phase 4：Graphify 关系图升级
@@ -113,7 +114,7 @@ pnpm v2:gray-smoke -- \
 - `/commit` 切为 v2-first 时仍保留 legacy JSONL shadow。
 - ConsolidationWorker 默认启动，但只处理 pending，不自动反复处理 needs_review。
 - Candidate review 必须可清空 blocked 状态。
-- Carrier projection 只由稳定 memories apply，且每次 apply 可 rollback。
+- Carrier projection 只由稳定 memories apply，直接 patch 必须有投影所有权标记，且每次 apply 可 rollback。
 
 回退方式：
 - `MEMORY_FABRIC_V2_MODE=shadow`：恢复 legacy recall 注入，保留 v2 shadow-write。

@@ -38,6 +38,7 @@ export interface CarrierProjectionRecord {
 }
 
 const PROJECTION_VERSION = "v2.0";
+const PROJECTION_MARKER_PREFIX = `<!-- memory-fabric projection:${PROJECTION_VERSION} memory:`;
 const SCHEMA_WHITELIST = new Set(["self-model.md", "decision-log.md", "execution-journal.md", "entities-glossary.md"]);
 
 function targetFile(entry: MemoryEntryV2): string | null {
@@ -74,11 +75,19 @@ function canProject(entry: MemoryEntryV2): boolean {
   return true;
 }
 
+function projectionMarker(entry: MemoryEntryV2): string {
+  return `${PROJECTION_MARKER_PREFIX}${entry.id} -->`;
+}
+
+function hasProjectionOwnership(patch: CarrierPatch): boolean {
+  return patch.content.includes(PROJECTION_MARKER_PREFIX);
+}
+
 function patchFor(entry: MemoryEntryV2): CarrierPatch | null {
   const filename = targetFile(entry);
   if (!filename) return null;
   const sourceRefs = entry.sourceRefs?.length ? `\n**Sources:** ${entry.sourceRefs.join(", ")}` : "";
-  const projection = `<!-- memory-fabric projection:${PROJECTION_VERSION} memory:${entry.id} -->`;
+  const projection = projectionMarker(entry);
 
   if (filename === "decision-log.md") {
     return {
@@ -89,7 +98,7 @@ function patchFor(entry: MemoryEntryV2): CarrierPatch | null {
   if (filename === "entities-glossary.md") {
     return {
       filename,
-      content: `- **${entry.content.slice(0, 80)}**: projected from ${entry.id}${entry.sourceRefs?.length ? ` (sources: ${entry.sourceRefs.join(", ")})` : ""}`,
+      content: `- **${entry.content.slice(0, 80)}**: projected from ${entry.id}${entry.sourceRefs?.length ? ` (sources: ${entry.sourceRefs.join(", ")})` : ""}\n${projection}`,
     };
   }
   if (filename === "self-model.md") {
@@ -158,8 +167,24 @@ export class CarrierProjectionEngine {
   }
 
   async apply(opts: { agentId: string; projectId?: string; entries?: MemoryEntryV2[]; patches?: CarrierPatch[] }): Promise<CarrierProjectionRecord> {
-    const patches = (opts.patches ?? opts.entries?.map((entry) => (canProject(entry) ? patchFor(entry) : null)).filter((patch): patch is CarrierPatch => patch !== null) ?? [])
-      .filter((patch) => SCHEMA_WHITELIST.has(patch.filename));
+    const rawPatches =
+      opts.patches ??
+      opts.entries
+        ?.map((entry) => (canProject(entry) ? patchFor(entry) : null))
+        .filter((patch): patch is CarrierPatch => patch !== null) ??
+      [];
+    const policySkipped: string[] = [];
+    const patches = rawPatches.filter((patch) => {
+      if (!SCHEMA_WHITELIST.has(patch.filename)) {
+        policySkipped.push(`${patch.filename} (outside projection schema whitelist)`);
+        return false;
+      }
+      if (opts.patches && !hasProjectionOwnership(patch)) {
+        policySkipped.push(`${patch.filename} (missing memory-fabric projection marker)`);
+        return false;
+      }
+      return true;
+    });
     const files = [...new Set(patches.map((patch) => patch.filename))];
     const before = await this.carriers.read({
       agentId: opts.agentId,
@@ -185,7 +210,7 @@ export class CarrierProjectionEngine {
       patches,
       rollbackPatches,
       merged: mergeResult.merged,
-      skipped: mergeResult.skipped,
+      skipped: [...policySkipped, ...mergeResult.skipped],
     };
     await this.appendHistory(record);
     return record;
