@@ -7,6 +7,40 @@
 
 ---
 
+## 0. 自研 v2 生产化补充
+
+v2 是当前生产化主线，目标是在不修改 OpenClaw 官方核心源码的前提下，把 plugin、sidecar、web 和 workspace 工具层升级为证据驱动的分层记忆系统。旧 `/recall`、`/commit`、`/carrier/*` 继续保留，v2 通过 `MEMORY_FABRIC_V2_MODE=off|shadow|v2-recall|v2-write` 灰度。
+
+```mermaid
+flowchart LR
+  A["agent_end / commit"] --> B["legacy /commit"]
+  B --> C["OpenViking JSONL"]
+  B --> D["EventLedgerService (L0)"]
+  D --> E["AtomicMemoryStore (L1 candidates)"]
+  E --> F["ConsolidationWorker"]
+  F --> G["MemoryConsolidator"]
+  G --> H["MemoryCoreV2 stable memories"]
+  G --> I["V2RelationGraphService"]
+  H --> J["RetrievalPlanner"]
+  I --> J
+  J --> K["MemoryCardPackager"]
+  K --> L["before_prompt_build memory cards"]
+  H --> M["CarrierProjectionEngine"]
+  M --> N["Carrier Markdown projection"]
+  H --> O["MemoryBenchRunner / FixtureSeeder"]
+  O --> P["Gray Status / Bench Report"]
+```
+
+v2 的关键边界：
+
+- L0 event ledger 是 append-only 证据账本，记录消息、工具调用、文件摘要、diff、附件摘要、运行时错误和状态。
+- L1 candidate queue 是低风险写入入口；没有 `sourceRefs` 的内容只能停留在 `needs_review` 或 `rejected`。
+- `MemoryConsolidator` 负责 promotion、去重、冲突检测、`supersedes`、`validUntil`、质量评分和 relation graph 写入。
+- `RetrievalPlanner` 负责可解释检索计划和 Hybrid RRF，`MemoryCardPackager` 只向 prompt 注入 evidence-backed memory cards。
+- Carrier 是结构化记忆的 Markdown 投影，不再作为唯一事实源；projection apply 前记录 rollback patch，可审计和回滚。
+- `V2RelationGraphService` 从共现图升级为语义关系图，支持 `DECIDES`、`IMPLEMENTS`、`SUPERSEDES`、`CAUSES`、`VALIDATES`、`CONSTRAINS`。
+- `MemoryBenchFixtureSeeder` 负责把真实或默认 bench cases 灌入 L0/L1/stable memory；`GET /v2/gray/status` 把 mode、worker、candidate queue、recall audit 和 latest bench 汇总为灰度决策面板。
+
 ## 1. 整体架构
 
 ```
@@ -470,6 +504,34 @@ React 18 + Vite + TypeScript + Tailwind CSS 构建的 SPA，通过 `@fastify/sta
 | 方法 | 路径 | 说明 | 阶段 |
 |------|------|------|------|
 | POST | `/lifecycle/gc` | 垃圾回收 (共享+草稿+压缩) | Phase D |
+
+### 6.8 v2 生产化端点
+
+| 方法 | 路径 | 说明 | 阶段 |
+|------|------|------|------|
+| POST | `/v2/events` | 追加 L0 evidence event | v2 Phase 1 |
+| POST | `/v2/memories/candidates` | 写入 L1 candidate | v2 Phase 1 |
+| GET | `/v2/memories/candidates` | 查询 candidate queue | v2 Phase 1 |
+| GET | `/v2/memories/candidates/stats` | candidate 状态和类型统计 | v2 Phase 1 |
+| POST | `/v2/memories/candidates/:id/review` | 人工 approve/reject candidate | v2 Phase 1 |
+| POST | `/v2/memories/candidates/retry` | 批量 retry candidate | v2 Phase 1 |
+| POST | `/v2/consolidation/run` | 手动巩固 pending candidates | v2 Phase 1 |
+| POST | `/v2/consolidation/worker/start` | 启动巩固 worker | v2 Phase 1 |
+| POST | `/v2/consolidation/worker/stop` | 停止巩固 worker | v2 Phase 1 |
+| GET | `/v2/consolidation/status` | worker 状态和 candidate stats | v2 Phase 1 |
+| GET | `/v2/gray/status` | 灰度汇总状态和 readiness flags | v2 Milestone A |
+| POST | `/v2/recall/plan` | 可解释检索计划和 memory cards | v2 Phase 2 |
+| POST | `/v2/recall/audit` | 写入 legacy/v2 recall 对照日志 | v2 Phase 2 |
+| GET | `/v2/recall/audit` | 查询 recall 对照日志 | v2 Phase 2 |
+| GET | `/v2/memories/:id/trace` | 查看 source trace 和 relation trace | v2 Phase 2 |
+| GET | `/v2/carriers/drift` | Carrier 投影漂移审计 | v2 Phase 3 |
+| POST | `/v2/carriers/projection/apply` | 应用 Carrier projection | v2 Phase 3 |
+| POST | `/v2/carriers/projection/rollback` | 回滚 Carrier projection | v2 Phase 3 |
+| GET | `/v2/carriers/projection/history` | 查询 projection 历史 | v2 Phase 3 |
+| GET | `/v2/graph/relations` | 查询语义关系图 | v2 Phase 4 |
+| POST | `/v2/bench/seed` | 灌入可重复 Bench fixture | v2 Milestone B |
+| POST | `/v2/bench/run` | 运行 Memory Bench | v2 Phase 5 |
+| GET | `/v2/bench/report` | 读取 latest Bench report | v2 Phase 5 |
 
 ---
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "./test-helpers.js";
 import { ExportService } from "../src/core/export-service.js";
 import { MemoryEntryBuilder } from "../src/models/schema-v2.js";
 

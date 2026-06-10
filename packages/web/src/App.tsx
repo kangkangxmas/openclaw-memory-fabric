@@ -10,6 +10,7 @@ import { GraphView } from "./pages/GraphView";
 import { CarrierViewer } from "./pages/CarrierViewer";
 import { LearningDashboard } from "./pages/LearningDashboard";
 import { FederationPage } from "./pages/FederationPage";
+import { V2Inspector } from "./pages/V2Inspector";
 
 export interface AppContext {
   agentId: string;
@@ -96,6 +97,7 @@ export default function App() {
         {page === "carriers" && <CarrierViewer ctx={ctx} />}
         {page === "learning" && <LearningDashboard ctx={ctx} />}
         {page === "federation" && <FederationPage ctx={ctx} />}
+        {page === "v2" && <V2Inspector ctx={ctx} />}
       </Layout>
     </div>
   );

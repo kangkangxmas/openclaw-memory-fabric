@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "./test-helpers.js";
 import { MemoryIndex } from "../src/core/memory-index.js";
 import { MemoryEntryBuilder } from "../src/models/schema-v2.js";
 

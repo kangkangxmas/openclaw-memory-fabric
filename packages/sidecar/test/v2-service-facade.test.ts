@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll } from "./test-helpers.js";
 import { V2ServiceFacade, type V2FacadeConfig } from "../src/services/v2-service-facade.js";
 import type { MemoryEntryV2 } from "../src/models/schema-v2.js";
 
@@ -7,6 +7,7 @@ describe("V2ServiceFacade", () => {
 
   const testConfig: V2FacadeConfig = {
     sidecarConfig: {
+      mode: "local",
       basePath: "/tmp/facade-test",
       targetRoot: "memories",
     },

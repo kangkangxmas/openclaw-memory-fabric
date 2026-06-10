@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "./test-helpers.js";
 import { EmbeddingServiceV2 } from "../src/services/embedding-service-v2.js";
 
 describe("EmbeddingServiceV2", () => {

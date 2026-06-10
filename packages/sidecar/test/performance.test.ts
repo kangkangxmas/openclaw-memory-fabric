@@ -1,11 +1,11 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "./test-helpers.js";
 import { MemoryCoreV2 } from "../src/core/memory-core-v2.js";
 import { MemoryIndex } from "../src/core/memory-index.js";
 import { MemoryEntryBuilder } from "../src/models/schema-v2.js";
 
 describe("Performance Benchmarks", () => {
   const createEntry = (i: number) => {
-    const types = ["fact", "decision", "entity", "pattern", "experience"] as const;
+    const types = ["fact", "decision", "entity", "pattern", "lesson"] as const;
     return new MemoryEntryBuilder()
       .id(`bench-${i}`)
       .type(types[i % types.length])
@@ -81,6 +81,7 @@ describe("Performance Benchmarks", () => {
   describe("MemoryCoreV2 Performance", () => {
     it("should create 100 entries under 500ms", async () => {
       const core = new MemoryCoreV2({
+        mode: "local",
         basePath: "/tmp/bench-core",
         targetRoot: "bench",
       });
@@ -105,6 +106,7 @@ describe("Performance Benchmarks", () => {
 
     it("should query 100 entries under 200ms", async () => {
       const core = new MemoryCoreV2({
+        mode: "local",
         basePath: "/tmp/bench-query",
         targetRoot: "bench",
       });

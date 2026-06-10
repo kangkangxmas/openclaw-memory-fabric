@@ -192,10 +192,182 @@ export interface ApprovalEntry {
   reviewedBy?: string;
 }
 
+export interface MemoryCard {
+  memoryId: string;
+  type: string;
+  time: string;
+  confidence: number;
+  content: string;
+  evidence: string[];
+  evidenceSummary?: string;
+  tokenCost?: number;
+  conflict?: string;
+}
+
+export interface V2RecallPlanResponse {
+  ok: boolean;
+  plan: {
+    query: string;
+    intent: string;
+    reason: string;
+  };
+  cards: MemoryCard[];
+  rendered: string;
+  executionTimeMs: number;
+  relations?: V2Relation[];
+}
+
+export interface V2TraceResponse {
+  ok: boolean;
+  memoryId: string;
+  status: string;
+  sourceRefs: string[];
+  sources: Array<Record<string, unknown>>;
+  events: Array<Record<string, unknown>>;
+  relations?: V2Relation[];
+}
+
+export interface V2Candidate {
+  candidateId: string;
+  agentId: string;
+  projectId?: string;
+  type: string;
+  content: string;
+  sourceRefs: string[];
+  confidence: number;
+  status: "pending" | "needs_review" | "rejected" | "promoted";
+  createdAt: string;
+  updatedAt: string;
+  promotedMemoryId?: string;
+  reviewReason?: string;
+  tags: string[];
+}
+
+export interface V2CandidateStats {
+  total: number;
+  byStatus: Record<V2Candidate["status"], number>;
+  byType: Record<string, number>;
+}
+
+export interface V2ConsolidationStatus {
+  running: boolean;
+  intervalMs: number;
+  limit: number;
+  agentId?: string;
+  projectId?: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  runCount: number;
+  errorCount: number;
+  lastError?: string;
+  lastResult?: Record<string, unknown>;
+}
+
+export interface CarrierDriftIssue {
+  filename: string;
+  memoryId: string;
+  type: string;
+  severity: "low" | "medium" | "high";
+  message: string;
+}
+
+export interface V2CarrierDriftReport {
+  agentId: string;
+  projectId?: string;
+  checkedAt: string;
+  projectionVersion: string;
+  issues: CarrierDriftIssue[];
+  patches: Array<{ filename: string; content: string }>;
+}
+
+export interface V2CarrierProjectionRecord {
+  projectionId: string;
+  agentId: string;
+  projectId?: string;
+  projectionVersion: string;
+  status: "applied" | "rolled_back";
+  appliedAt: string;
+  rolledBackAt?: string;
+  patches: Array<{ filename: string; content: string }>;
+  rollbackPatches: Array<{ filename: string; content: string }>;
+  merged: string[];
+  skipped: string[];
+}
+
+export interface V2Relation {
+  relationId: string;
+  agentId: string;
+  projectId?: string;
+  type: "DECIDES" | "IMPLEMENTS" | "SUPERSEDES" | "CAUSES" | "VALIDATES" | "CONSTRAINS";
+  sourceKind: string;
+  sourceId: string;
+  targetKind: string;
+  targetId: string;
+  confidence: number;
+  evidenceRefs: string[];
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface V2BenchReport {
+  generatedAt: string;
+  cases: number;
+  recallAt5: number;
+  injectionPrecision: number;
+  staleRate: number;
+  sourceCoverage: number;
+  avgCardChars: number;
+  p95LatencyMs: number;
+  results: Array<{
+    id: string;
+    hit: boolean;
+    cardCount: number;
+    latencyMs: number;
+  }>;
+}
+
+export interface V2BenchSeedResult {
+  agentId: string;
+  projectId?: string;
+  requested: number;
+  skippedExisting: number;
+  createdEvents: number;
+  createdCandidates: number;
+  promoted: number;
+  needsReview: number;
+  rejected: number;
+  memoryIds: string[];
+}
+
+export interface V2GrayStatus {
+  ok: boolean;
+  mode: "off" | "shadow" | "v2-recall" | "v2-write";
+  agentId: string;
+  projectId?: string;
+  worker: V2ConsolidationStatus;
+  candidateStats: V2CandidateStats;
+  recallAudit: {
+    count: number;
+    lastAt?: string;
+    avgV2CardCount: number;
+    avgLegacySourceCount: number;
+  };
+  bench: V2BenchReport | null;
+  readiness: {
+    modeReady: boolean;
+    sourceCoverageReady: boolean;
+    latencyReady: boolean;
+    candidateQueueHealthy: boolean;
+  };
+}
+
 export type Page =
   | "overview"
   | "memory"
   | "graph"
   | "carriers"
   | "learning"
-  | "federation";
+  | "federation"
+  | "v2";

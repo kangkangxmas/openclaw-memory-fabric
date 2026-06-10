@@ -9,7 +9,6 @@
  * - Backward compatible with V1 VectorService
  */
 
-import type { VectorStore } from "../stores/vector-store.js";
 import type { EmbeddingServiceV2 } from "./embedding-service-v2.js";
 import type { MemoryEntryV2, MemoryEmbedding } from "../models/schema-v2.js";
 
@@ -31,6 +30,15 @@ export interface IndexOptions {
   overwrite?: boolean;
   /** Optional pre-computed embedding */
   embedding?: MemoryEmbedding;
+}
+
+interface VectorStoreLike {
+  add(entry: { entryId: string; agentId: string; text: string; vector: number[]; createdAt: number }): Promise<void>;
+  entries(): IterableIterator<[string, number[]]>;
+  has(entryId: string): boolean;
+  remove(entryId: string): Promise<void>;
+  size(): number;
+  clear(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +97,7 @@ export class VectorServiceV2 {
   private readonly config: HybridConfig;
 
   constructor(
-    private readonly store: VectorStore,
+    private readonly store: VectorStoreLike,
     private readonly embedder: EmbeddingServiceV2,
     config?: Partial<HybridConfig>
   ) {

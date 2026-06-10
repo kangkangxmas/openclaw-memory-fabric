@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "./test-helpers.js";
 import { MemoryCache } from "../src/core/memory-cache.js";
 import { MemoryEntryBuilder } from "../src/models/schema-v2.js";
 

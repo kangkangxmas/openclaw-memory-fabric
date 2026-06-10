@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "./test-helpers.js";
 import { VectorServiceV2 } from "../src/services/vector-service-v2.js";
 import { VectorStoreV2 } from "../src/stores/vector-store-v2.js";
 import { EmbeddingServiceV2 } from "../src/services/embedding-service-v2.js";

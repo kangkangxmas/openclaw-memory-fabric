@@ -20,6 +20,55 @@ export interface RecallResponse {
   taskType?: string;
 }
 
+export interface V2RecallPlanRequest {
+  query: string;
+  agentId?: string;
+  projectId?: string;
+  scope?: "private" | "project" | "shared";
+  limit?: number;
+}
+
+export interface MemoryCard {
+  memoryId: string;
+  type: string;
+  time: string;
+  confidence: number;
+  content: string;
+  evidence: string[];
+  conflict?: string;
+}
+
+export interface V2RecallPlanResponse {
+  ok: true;
+  plan: {
+    query: string;
+    intent: string;
+    reason: string;
+  };
+  cards: MemoryCard[];
+  rendered: string;
+  executionTimeMs: number;
+}
+
+export interface RecallAuditRequest {
+  agentId?: string;
+  projectId?: string;
+  query: string;
+  mode: string;
+  legacy?: {
+    sourceCount?: number;
+    budgetUsed?: number;
+    memoryBriefChars?: number;
+  };
+  v2?: {
+    intent?: string;
+    cardCount?: number;
+    evidenceCount?: number;
+    renderedChars?: number;
+    executionTimeMs?: number;
+  };
+}
+
 export interface CommitRequest {
   agentId: string;
   projectId?: string;
@@ -230,6 +279,14 @@ export class SidecarClient {
 
   async recall(req: RecallRequest): Promise<RecallResponse> {
     return this.request<RecallResponse>("POST", "/recall", req);
+  }
+
+  async recallPlan(req: V2RecallPlanRequest): Promise<V2RecallPlanResponse> {
+    return this.request<V2RecallPlanResponse>("POST", "/v2/recall/plan", req);
+  }
+
+  async recallAudit(req: RecallAuditRequest): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>("POST", "/v2/recall/audit", req);
   }
 
   async commit(req: CommitRequest): Promise<CommitResponse> {

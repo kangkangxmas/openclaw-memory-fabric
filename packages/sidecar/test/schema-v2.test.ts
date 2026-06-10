@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "./test-helpers.js";
 import {
   MemoryEntryBuilder,
   generateMemoryId,

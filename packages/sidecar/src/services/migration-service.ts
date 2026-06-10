@@ -38,6 +38,8 @@ export interface MigrationStatus {
   migratedCount: number;
   /** 失败数 */
   failedCount: number;
+  /** 跳过的重复数 */
+  skippedDuplicates: number;
 }
 
 export interface MigrationResult {
@@ -141,6 +143,7 @@ export class MigrationService {
     const dir = dirname(filePath);
     const backupPath = `${filePath}${BACKUP_SUFFIX}`;
     const errors: string[] = [];
+    let skippedDuplicates = 0;
 
     // 1. 读取现有条目
     const entries = await readJsonl<unknown>(filePath);
@@ -148,7 +151,17 @@ export class MigrationService {
     let migratedCount = 0;
     let failedCount = 0;
 
+    // Dedup set: generate unique key per entry to skip duplicates
+    const dedupSet = new Set<string>();
+
     for (const entry of entries) {
+      // Generate a dedup key from type + trimmed content
+      const dedupKey = `${String((entry as Record<string, unknown>).type ?? "unknown")}|${String((entry as Record<string, unknown>).content ?? "").trim().toLowerCase()}`;
+      if (dedupSet.has(dedupKey)) {
+        skippedDuplicates++;
+        continue;
+      }
+      dedupSet.add(dedupKey);
       if (isV2Entry(entry)) {
         // 已经是 V2，保留
         v2Entries.push(entry as MemoryEntryV2);
@@ -217,7 +230,8 @@ export class MigrationService {
       migratedAt: new Date().toISOString(),
       totalEntries: entries.length,
       migratedCount,
-      failedCount
+      failedCount,
+      skippedDuplicates
     };
     await writeMigrationMarker(dir, status);
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "./test-helpers.js";
 import { MemoryCoreV2 } from "../src/core/memory-core-v2.js";
 import { QueryRouter } from "../src/core/query-router.js";
 import { MemoryEntryBuilder } from "../src/models/schema-v2.js";
@@ -7,6 +7,7 @@ describe("QueryRouter", () => {
   let core: MemoryCoreV2;
   let router: QueryRouter;
   const testConfig = {
+    mode: "local" as const,
     basePath: "/tmp/query-router-test",
     targetRoot: "test",
   };

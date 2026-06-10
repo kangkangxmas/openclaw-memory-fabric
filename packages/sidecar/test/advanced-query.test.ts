@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "./test-helpers.js";
 import { AdvancedQuery } from "../src/core/advanced-query.js";
 import { MemoryEntryBuilder } from "../src/models/schema-v2.js";
 

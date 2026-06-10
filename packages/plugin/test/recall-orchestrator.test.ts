@@ -191,6 +191,57 @@ describe("RecallOrchestrator.execute()", () => {
     assert.equal(capturedReq.taskType, "debug");
   });
 
+  it("uses v2 memory cards when v2 recall mode is enabled", async () => {
+    const previousMode = process.env.MEMORY_FABRIC_V2_MODE;
+    process.env.MEMORY_FABRIC_V2_MODE = "v2-recall";
+    let legacyRecallCalled = false;
+    let auditPayload: Record<string, unknown> | null = null;
+    const client = makeClient({
+      recall: async () => {
+        legacyRecallCalled = true;
+        return { memoryBrief: "legacy", sources: ["legacy"], budgetUsed: 10 };
+      },
+      recallPlan: async () => ({
+        ok: true,
+        plan: {
+          query: "why v2",
+          intent: "decision_history",
+          reason: "test",
+        },
+        cards: [
+          {
+            memoryId: "mem-1",
+            type: "decision",
+            time: "2026-06-10T00:00:00.000Z",
+            confidence: 0.9,
+            content: "Memory Fabric v2 uses self-researched memory cards.",
+            evidence: ["evt-1"],
+          },
+        ],
+        rendered: "### Memory Cards\n- Memory Fabric v2 uses self-researched memory cards.",
+        executionTimeMs: 1,
+      }),
+      recallAudit: async (req: Record<string, unknown>) => {
+        auditPayload = req;
+        return { ok: true };
+      },
+    });
+
+    try {
+      const orch = new RecallOrchestrator(client as never, baseConfig);
+      const result = await orch.execute({ agentId: "a1", latestMessage: "why v2" });
+      assert.equal(legacyRecallCalled, true);
+      assert.ok(auditPayload);
+      assert.equal((auditPayload as { mode?: string }).mode, "v2-recall");
+      assert.ok(result.brief.includes("Memory Cards"));
+      assert.ok(result.sources.includes("v2:recall-plan:decision_history"));
+      assert.ok(result.sources.includes("event:evt-1"));
+    } finally {
+      if (previousMode === undefined) delete process.env.MEMORY_FABRIC_V2_MODE;
+      else process.env.MEMORY_FABRIC_V2_MODE = previousMode;
+    }
+  });
+
   it("requests extra carrier files for debug task type at l1", async () => {
     let capturedFiles: string[] = [];
     const client = makeClient({

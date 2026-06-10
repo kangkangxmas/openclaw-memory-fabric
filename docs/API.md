@@ -107,6 +107,257 @@ Base URL: `http://127.0.0.1:7811`
 
 ---
 
+## v2 自研记忆接口
+
+v2 接口统一挂在 `/v2/*`，用于 L0 event、L1 candidate、异步巩固、memory cards、Carrier projection、relation graph 和 Bench。旧 `/recall`、`/commit`、`/carrier/*` 保持兼容。
+
+### POST /v2/events
+
+追加 L0 evidence event。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "sourceType": "message",
+  "sourceUri": "session://...",
+  "content": "User explicitly requested v2 self-research route."
+}
+```
+
+返回 `event.eventId`、`event.contentHash`、`event.sourceUri`。
+
+### POST /v2/memories/candidates
+
+写入 L1 candidates。没有 `sourceRefs` 的 candidate 会进入 `needs_review`，不会直接进入稳定库。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "candidates": [
+    {
+      "type": "decision",
+      "content": "v2 keeps Hy-Memory as design reference only.",
+      "sourceRefs": ["evt_..."],
+      "confidence": 0.9
+    }
+  ]
+}
+```
+
+### GET /v2/memories/candidates
+
+查询候选记忆。
+
+Query:
+
+- `agentId`
+- `projectId`
+- `status=pending,needs_review,rejected,promoted`
+- `limit`
+
+### GET /v2/memories/candidates/stats
+
+返回 candidate 总量、按状态统计、按类型统计。
+
+### POST /v2/memories/candidates/:id/review
+
+人工 review candidate。
+
+```json
+{
+  "agentId": "development",
+  "decision": "approve",
+  "reviewedBy": "inspector",
+  "reason": "explicit user instruction"
+}
+```
+
+`approve` 会打上 `manual_review_approved`，但不能绕过 `sourceRefs` 必填门禁。
+
+### POST /v2/memories/candidates/retry
+
+批量把 `needs_review` 或 `rejected` candidate 重置为可重试状态。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "statuses": ["rejected"],
+  "limit": 100
+}
+```
+
+### POST /v2/consolidation/run
+
+手动执行一次巩固。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "limit": 100
+}
+```
+
+### POST /v2/consolidation/worker/start
+
+启动后台巩固 worker。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "intervalMs": 30000,
+  "limit": 100
+}
+```
+
+### POST /v2/consolidation/worker/stop
+
+停止后台巩固 worker。
+
+### GET /v2/consolidation/status
+
+返回 worker 状态和 candidate stats。
+
+### GET /v2/gray/status
+
+返回 v2 灰度汇总状态，用于 daily check 和 Inspector 顶层状态卡。
+
+Query:
+
+- `agentId` 默认 `development`
+- `projectId` 可选
+
+Response 包含：
+
+- `mode`：`MEMORY_FABRIC_V2_MODE` 当前值，默认 `shadow`
+- `worker`：ConsolidationWorker 状态
+- `candidateStats`：candidate queue 总量、状态和类型分布
+- `recallAudit`：最近 audit 数量、最近时间、v2 cards 与 legacy sources 均值
+- `bench`：最新 Bench report，可能为 `null`
+- `readiness`：`modeReady`、`sourceCoverageReady`、`latencyReady`、`candidateQueueHealthy`
+
+### POST /v2/recall/plan
+
+返回可解释检索计划、稳定记忆、memory cards 和渲染文本。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "query": "为什么 v2 不直接接入 Hy-Memory",
+  "scope": "project",
+  "limit": 5
+}
+```
+
+Response 包含：
+
+- `plan.intent`
+- `plan.weights`
+- `entries`
+- `cards`
+- `rendered`
+- `relations`
+- `executionTimeMs`
+
+### POST /v2/recall/audit
+
+记录 legacy recall 与 v2 recall 对照日志。plugin 在 `MEMORY_FABRIC_V2_MODE=v2-recall|v2-write` 且 v2 cards 命中时调用。
+
+### GET /v2/recall/audit
+
+查询 recall 对照日志，支持 `agentId`、`projectId`、`limit`。
+
+### GET /v2/memories/:id/trace
+
+查看稳定记忆的 source trace：`sourceRefs`、原始 sources、L0 events、relation trace。
+
+### GET /v2/carriers/drift
+
+查看结构化记忆与 Carrier Markdown 投影的漂移。
+
+Query:
+
+- `agentId` 必填
+- `projectId` 可选
+- `limit` 可选
+
+### POST /v2/carriers/projection/apply
+
+将稳定结构化记忆应用到 Carrier 投影。apply 前会记录 rollback snapshot。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "memoryIds": ["mem_..."],
+  "limit": 100
+}
+```
+
+### POST /v2/carriers/projection/rollback
+
+按 projectionId 回滚 Carrier 投影。
+
+```json
+{
+  "projectionId": "proj_..."
+}
+```
+
+### GET /v2/carriers/projection/history
+
+查看 projection apply/rollback 历史。
+
+### GET /v2/graph/relations
+
+查询 v2 语义关系图。
+
+Query:
+
+- `agentId`
+- `projectId`
+- `type=DECIDES|IMPLEMENTS|SUPERSEDES|CAUSES|VALIDATES|CONSTRAINS`
+- `memoryId`
+- `limit`
+
+### POST /v2/bench/run
+
+运行 Memory Bench v0，可传自定义 cases。
+
+### POST /v2/bench/seed
+
+把默认或自定义 bench cases 灌入 v2 结构化记忆库。接口会为每个 case 写入 L0 event、L1 candidate，并运行 consolidator；重复执行会按 fixture tag 跳过已存在记忆。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "limit": 50,
+  "cases": [
+    {
+      "id": "real-session-001",
+      "query": "v2 为什么不直接依赖 Hy-Memory",
+      "expectedTerms": ["Hy-Memory", "runtime", "自研"],
+      "agentId": "development",
+      "projectId": "openclaw-memory-fabric"
+    }
+  ]
+}
+```
+
+Response 包含 `requested`、`skippedExisting`、`createdEvents`、`createdCandidates`、`promoted`、`needsReview`、`rejected` 和 `memoryIds`。
+
+### GET /v2/bench/report
+
+读取最新一次 Bench report。
+
+---
+
 ## GET /patterns?agentId={agentId}
 
 查询识别出的稳定模式（P1-1）。

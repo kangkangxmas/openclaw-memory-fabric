@@ -18,6 +18,17 @@ import type {
   FederationEntry,
   DependencyGraph,
   ApprovalEntry,
+  V2RecallPlanResponse,
+  V2TraceResponse,
+  V2CarrierDriftReport,
+  V2CarrierProjectionRecord,
+  V2Candidate,
+  V2CandidateStats,
+  V2ConsolidationStatus,
+  V2BenchReport,
+  V2BenchSeedResult,
+  V2GrayStatus,
+  V2Relation,
 } from "../types";
 
 const BASE = "";
@@ -110,4 +121,102 @@ export const api = {
 
   reviewApproval: (entryId: string, decision: "approved" | "rejected", reviewedBy: string) =>
     post<{ ok: boolean }>("/federation/approval/review", { entryId, decision, reviewedBy }),
+
+  postV2RecallPlan: (req: {
+    query: string;
+    agentId?: string;
+    projectId?: string;
+    scope?: "private" | "project" | "shared";
+    limit?: number;
+  }) => post<V2RecallPlanResponse>("/v2/recall/plan", req),
+
+  getV2MemoryTrace: (memoryId: string) =>
+    get<V2TraceResponse>(`/v2/memories/${encodeURIComponent(memoryId)}/trace`),
+
+  getV2CarrierDrift: (agentId: string, projectId?: string) =>
+    get<{ ok: boolean; report: V2CarrierDriftReport }>(
+      `/v2/carriers/drift?agentId=${encodeURIComponent(agentId)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+
+  getV2Candidates: (agentId?: string, projectId?: string, status?: string) =>
+    get<{ ok: boolean; candidates: V2Candidate[]; count: number }>(
+      `/v2/memories/candidates${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+        status ? `status=${encodeURIComponent(status)}` : "",
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
+
+  getV2CandidateStats: (agentId?: string, projectId?: string) =>
+    get<{ ok: boolean; stats: V2CandidateStats }>(
+      `/v2/memories/candidates/stats${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
+
+  reviewV2Candidate: (candidateId: string, decision: "approve" | "reject", agentId?: string, reason?: string) =>
+    post<{ ok: boolean; candidate?: V2Candidate; error?: string }>(
+      `/v2/memories/candidates/${encodeURIComponent(candidateId)}/review`,
+      { agentId, decision, reviewedBy: "inspector", reason },
+    ),
+
+  getV2ConsolidationStatus: (agentId?: string, projectId?: string) =>
+    get<{ ok: boolean; status: V2ConsolidationStatus; candidateStats: V2CandidateStats }>(
+      `/v2/consolidation/status${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
+
+  startV2ConsolidationWorker: (agentId?: string, projectId?: string) =>
+    post<{ ok: boolean; status: V2ConsolidationStatus }>("/v2/consolidation/worker/start", {
+      agentId,
+      projectId,
+      intervalMs: 30_000,
+      limit: 100,
+    }),
+
+  stopV2ConsolidationWorker: () =>
+    post<{ ok: boolean; status: V2ConsolidationStatus }>("/v2/consolidation/worker/stop", {}),
+
+  applyV2CarrierProjection: (agentId: string, projectId?: string) =>
+    post<{ ok: boolean; projection: V2CarrierProjectionRecord }>("/v2/carriers/projection/apply", {
+      agentId,
+      projectId,
+      limit: 100,
+    }),
+
+  rollbackV2CarrierProjection: (projectionId: string) =>
+    post<{ ok: boolean; projection: V2CarrierProjectionRecord; error?: string }>("/v2/carriers/projection/rollback", {
+      projectionId,
+    }),
+
+  getV2GraphRelations: (agentId?: string, projectId?: string, memoryId?: string) =>
+    get<{ ok: boolean; relations: V2Relation[]; count: number }>(
+      `/v2/graph/relations${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+        memoryId ? `memoryId=${encodeURIComponent(memoryId)}` : "",
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
+
+  postV2BenchRun: () => post<{ ok: boolean; report: V2BenchReport }>("/v2/bench/run", {}),
+
+  getV2BenchReport: () => get<{ ok: boolean; report: V2BenchReport | null }>("/v2/bench/report"),
+
+  postV2BenchSeed: (agentId?: string, projectId?: string) =>
+    post<{ ok: boolean; result: V2BenchSeedResult }>("/v2/bench/seed", {
+      agentId,
+      projectId,
+      limit: 50,
+    }),
+
+  getV2GrayStatus: (agentId?: string, projectId?: string) =>
+    get<V2GrayStatus>(
+      `/v2/gray/status${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
 };

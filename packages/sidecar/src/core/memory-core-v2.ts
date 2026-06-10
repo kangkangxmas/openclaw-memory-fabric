@@ -166,6 +166,12 @@ export class MemoryCoreV2 {
     if (entry.metadata?.tags) entry.metadata.tags.forEach((t: string) => builder.tag(t));
     if (entry.relations) entry.relations.forEach((r) => builder.relation(r));
     if (entry.sources) entry.sources.forEach((s) => builder.source(s));
+    if (entry.sourceRefs) entry.sourceRefs.forEach((s) => builder.sourceRef(s));
+    if (entry.validFrom) builder.validFrom(entry.validFrom);
+    if (entry.validUntil !== undefined) builder.validUntil(entry.validUntil);
+    if (entry.supersedes) entry.supersedes.forEach((id) => builder.supersedes(id));
+    if (entry.status) builder.status(entry.status);
+    if (entry.quality) builder.quality(entry.quality);
     if (entry.blocks) entry.blocks.forEach((b) => builder.block(b.format, b.content, b.language));
 
     const newEntry = builder.build();
@@ -236,6 +242,12 @@ export class MemoryCoreV2 {
     if (updates.relations) entry.relations = [...(entry.relations ?? []), ...updates.relations];
     if (updates.embedding) entry.embedding = updates.embedding;
     if (updates.blocks) entry.blocks = updates.blocks;
+    if (updates.sourceRefs) entry.sourceRefs = updates.sourceRefs;
+    if (updates.validFrom) entry.validFrom = updates.validFrom;
+    if (updates.validUntil !== undefined) entry.validUntil = updates.validUntil;
+    if (updates.supersedes) entry.supersedes = updates.supersedes;
+    if (updates.status) entry.status = updates.status;
+    if (updates.quality) entry.quality = updates.quality;
 
     entry.timeline.updatedAt = new Date().toISOString();
     entry.timeline.version = (entry.timeline.version ?? 1) + 1;
@@ -319,12 +331,14 @@ export class MemoryCoreV2 {
 
     // Load all candidate entries
     let candidates: MemoryEntryV2[] = [];
-    if (candidateIds && candidateIds.length > 0) {
+    if (candidateIds !== undefined && candidateIds.length > 0) {
       // Load only indexed entries
       for (const id of candidateIds) {
         const entry = await this.read(id);
         if (entry) candidates.push(entry);
       }
+    } else if (candidateIds !== undefined) {
+      candidates = [];
     } else if (opts.scope) {
       candidates = await this.loadScope(opts.scope);
     } else {
@@ -359,7 +373,12 @@ export class MemoryCoreV2 {
 
     // Filter expired
     if (!opts.includeExpired) {
-      candidates = candidates.filter((e) => !isMemoryExpired(e));
+      candidates = candidates.filter((e) => {
+        if (isMemoryExpired(e)) return false;
+        if (e.status === "superseded" || e.status === "retracted" || e.status === "rejected") return false;
+        if (e.validUntil && new Date(e.validUntil).getTime() < Date.now()) return false;
+        return true;
+      });
     }
 
     // Time range filter (if not already indexed)
@@ -623,7 +642,7 @@ export class MemoryCoreV2 {
   // -------------------------------------------------------------------------
 
   private async persist(entry: MemoryEntryV2): Promise<void> {
-    const basePath = join(this.cfg.basePath, this.cfg.targetRoot);
+    const basePath = this.resolveBaseDir();
     const dir = join(basePath, "agents", entry.agentId, entry.scope);
     await ensureDir(dir);
     const memoriesPath = join(dir, "memories.jsonl");
@@ -729,6 +748,16 @@ export class MemoryCoreV2 {
     }
 
     const basePath = this.resolveBaseDir();
+    const agentsDir = join(basePath, "agents");
+    const { readdir } = await import("fs/promises");
+    if (existsSync(agentsDir)) {
+      const existingAgents = await readdir(agentsDir, { withFileTypes: true });
+      for (const agentDir of existingAgents) {
+        if (agentDir.isDirectory() && !byAgent.has(agentDir.name)) {
+          byAgent.set(agentDir.name, []);
+        }
+      }
+    }
 
     for (const [agentId, agentEntries] of byAgent) {
       const dir = join(basePath, "agents", agentId, scope);

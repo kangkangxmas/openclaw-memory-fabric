@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "./test-helpers.js";
 import { MemoryCoreV2 } from "../src/core/memory-core-v2.js";
 import { QueryRouter } from "../src/core/query-router.js";
 import { MemoryAPIV2 } from "../src/api/memory-api-v2.js";
@@ -6,6 +6,7 @@ import { MemoryAPIV2 } from "../src/api/memory-api-v2.js";
 describe("MemoryAPIV2", () => {
   let api: MemoryAPIV2;
   const testConfig = {
+    mode: "local" as const,
     basePath: "/tmp/memory-api-test",
     targetRoot: "test",
   };

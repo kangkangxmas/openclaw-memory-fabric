@@ -12,10 +12,25 @@
 // Base Types
 // ---------------------------------------------------------------------------
 
-export type MemoryType = "fact" | "decision" | "entity" | "pattern" | "unresolved" | "code" | "api" | "lesson";
+export type MemoryType =
+  | "fact"
+  | "decision"
+  | "entity"
+  | "pattern"
+  | "unresolved"
+  | "code"
+  | "api"
+  | "lesson"
+  | "risk"
+  | "todo"
+  | "preference"
+  | "episode"
+  | "profile"
+  | "intent";
 export type MemoryScope = "private" | "project" | "shared";
 export type Visibility = "private" | "project_shared" | "org_shared";
 export type ContentFormat = "text" | "code" | "json" | "markdown" | "url";
+export type MemoryStatus = "pending" | "active" | "superseded" | "retracted" | "needs_review" | "rejected";
 
 // ---------------------------------------------------------------------------
 // Content Block - 多模态内容支持
@@ -57,7 +72,18 @@ export interface MemoryTimeline {
 
 export interface MemoryRelation {
   /** 关联类型 */
-  type: "related" | "parent" | "child" | "supersedes" | "derived_from" | "contradicts";
+  type:
+    | "related"
+    | "parent"
+    | "child"
+    | "supersedes"
+    | "derived_from"
+    | "contradicts"
+    | "decides"
+    | "implements"
+    | "causes"
+    | "validates"
+    | "constrains";
   /** 关联目标记忆 ID */
   targetId: string;
   /** 关联强度（0-1） */
@@ -72,7 +98,7 @@ export interface MemoryRelation {
 
 export interface MemorySource {
   /** 来源类型 */
-  type: "session" | "document" | "code" | "external" | "imported";
+  type: "session" | "document" | "code" | "external" | "imported" | "event" | "tool" | "file" | "diff" | "attachment" | "runtime";
   /** 来源标识（如 session ID、文件路径） */
   identifier: string;
   /** 来源上下文（如代码行号、文档章节） */
@@ -123,6 +149,13 @@ export interface MemoryMetadata {
   custom?: Record<string, unknown>;
 }
 
+export interface MemoryQuality {
+  specificity: number;
+  actionability: number;
+  stability: number;
+  sourceCoverage: number;
+}
+
 // ---------------------------------------------------------------------------
 // Memory Entry V2 - 完整记忆条目
 // ---------------------------------------------------------------------------
@@ -150,6 +183,18 @@ export interface MemoryEntryV2 {
   relations?: MemoryRelation[];
   /** 来源追踪 */
   sources?: MemorySource[];
+  /** L0 evidence IDs. Stable long-term memories should always include at least one. */
+  sourceRefs?: string[];
+  /** Validity window start. Defaults to timeline.createdAt for new entries. */
+  validFrom?: string;
+  /** Validity window end when a newer entry supersedes this memory. */
+  validUntil?: string | null;
+  /** Direct superseded memory IDs. */
+  supersedes?: string[];
+  /** Quality gate scores used by consolidation and retrieval. */
+  quality?: MemoryQuality;
+  /** Governance status. */
+  status?: MemoryStatus;
   /** 向量嵌入 */
   embedding?: MemoryEmbedding;
   /** 元数据 */
@@ -189,6 +234,17 @@ export function migrateV1ToV2(v1: MemoryEntryV1): MemoryEntryV2 {
       createdAt: v1.createdAt,
       updatedAt: v1.createdAt,
       version: 1
+    },
+    sourceRefs: [],
+    validFrom: v1.createdAt,
+    validUntil: null,
+    supersedes: [],
+    status: "active",
+    quality: {
+      specificity: 0.5,
+      actionability: 0.5,
+      stability: 0.5,
+      sourceCoverage: 0
     },
     metadata: {
       tags: v1.tags || []
@@ -304,6 +360,38 @@ export class MemoryEntryBuilder {
     return this;
   }
 
+  sourceRef(sourceRef: string): this {
+    if (!this.entry.sourceRefs) this.entry.sourceRefs = [];
+    this.entry.sourceRefs.push(sourceRef);
+    return this;
+  }
+
+  validFrom(validFrom: string): this {
+    this.entry.validFrom = validFrom;
+    return this;
+  }
+
+  validUntil(validUntil: string | null): this {
+    this.entry.validUntil = validUntil;
+    return this;
+  }
+
+  supersedes(memoryId: string): this {
+    if (!this.entry.supersedes) this.entry.supersedes = [];
+    this.entry.supersedes.push(memoryId);
+    return this;
+  }
+
+  quality(quality: MemoryQuality): this {
+    this.entry.quality = quality;
+    return this;
+  }
+
+  status(status: MemoryStatus): this {
+    this.entry.status = status;
+    return this;
+  }
+
   embedding(embedding: MemoryEmbedding): this {
     this.entry.embedding = embedding;
     return this;
@@ -340,6 +428,17 @@ export class MemoryEntryBuilder {
     if (!this.entry.metadata) {
       this.entry.metadata = { tags: [] };
     }
+    this.entry.sourceRefs ??= [];
+    this.entry.validFrom ??= this.entry.timeline.createdAt;
+    this.entry.validUntil ??= null;
+    this.entry.supersedes ??= [];
+    this.entry.status ??= "active";
+    this.entry.quality ??= {
+      specificity: 0.5,
+      actionability: 0.5,
+      stability: 0.5,
+      sourceCoverage: this.entry.sourceRefs.length > 0 ? 1 : 0
+    };
 
     return this.entry as MemoryEntryV2;
   }

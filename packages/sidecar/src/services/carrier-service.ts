@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
+import { createHash } from "crypto";
 import { validateId } from "../utils/path-guard.js";
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,30 @@ function rotateJournal(content: string): string {
   ];
 
   return [...headerLines, ...archiveBlock, ...keepLines].join("\n");
+}
+
+/** Compute a short content hash (first 12 hex chars of SHA256) for dedup */
+function contentHash(content: string): string {
+  return createHash("sha256").update(content.trim()).digest("hex").slice(0, 12);
+}
+
+/**
+ * Check if the new content already appears in the tail of the existing file.
+ * Scans last N lines for matching content hash to prevent repeat appends.
+ */
+function isDuplicateAppend(existing: string, incoming: string, tailLines = 50): boolean {
+  const newHash = contentHash(incoming);
+  const lines = existing.split("\n");
+  const tail = lines.slice(-Math.min(tailLines, lines.length));
+  for (const line of tail) {
+    if (contentHash(line) === newHash) return true;
+  }
+  // Also check if the full incoming block appears as a substring
+  const snippet = incoming.trim().slice(0, 120);
+  // Only consider it a duplicate if the snippet starts with a date-prefixed
+  // section header (## YYYY-MM-DD pattern), which makes it a real journal entry.
+  if (!/^## \d{4}-\d{2}-\d{2}/.test(snippet)) return false;
+  return existing.includes(snippet);
 }
 
 function normalizeMergeText(value: string): string {
@@ -132,7 +157,7 @@ const PRIVATE_CARRIERS: CarrierDef[] = [
   },
   {
     filename: "self-model.md",
-    strategy: "overwrite",
+    strategy: "conflict-preserve",
     description: "Agent's self-understanding: current goal, known/unknown, next actions",
     template: `# Self Model
 
@@ -371,18 +396,59 @@ export class CarrierRepository {
     return { merged, skipped };
   }
 
+  async replace(opts: {
+    agentId: string;
+    projectId?: string;
+    files: CarrierPatch[];
+  }): Promise<{ replaced: string[]; skipped: string[] }> {
+    const { agentId, projectId, files } = opts;
+    validateId(agentId, "agentId");
+    if (projectId) validateId(projectId, "projectId");
+    const replaced: string[] = [];
+    const skipped: string[] = [];
+    const allDefs = [...PRIVATE_CARRIERS, ...PROJECT_CARRIERS];
+    const defMap = new Map(allDefs.map((d) => [d.filename, d]));
+
+    for (const file of files) {
+      const def = defMap.get(file.filename);
+      if (!def) {
+        skipped.push(`${file.filename} (unknown carrier)`);
+        continue;
+      }
+      const isPrivate = PRIVATE_CARRIERS.some((d) => d.filename === file.filename);
+      const dir = isPrivate
+        ? this.privatePath(agentId)
+        : projectId
+          ? this.projectPath(agentId, projectId)
+          : null;
+      if (!dir) {
+        skipped.push(`${file.filename} (requires projectId)`);
+        continue;
+      }
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, def.filename), file.content, "utf8");
+      replaced.push(file.filename);
+    }
+
+    return { replaced, skipped };
+  }
+
   private async applyPatch(filePath: string, def: CarrierDef, incoming: string): Promise<void> {
     const existing = existsSync(filePath) ? await readFile(filePath, "utf8") : def.template;
 
     switch (def.strategy) {
       case "overwrite": {
-        // Replace entire file content
+        // Replace entire file content (skip if incoming is empty to preserve existing)
+        if (incoming.trim().length === 0) break;
         await writeFile(filePath, incoming, "utf8");
         break;
       }
 
       case "append": {
-        // Unconditionally append new content with a separator
+        // Dedup check: skip if the same content block already appears in the tail
+        if (isDuplicateAppend(existing, incoming)) break;
+
+        // Append new content with a separator
         const separator = `\n<!-- appended: ${new Date().toISOString()} -->\n`;
         let appended = existing + separator + incoming;
 
@@ -425,13 +491,42 @@ export class CarrierRepository {
       }
 
       case "conflict-preserve": {
-        // Append with a conflict marker if content seems different from existing
-        const normalized = incoming.trim();
-        const alreadyPresent = existing.includes(normalized.slice(0, 40));
-        if (!alreadyPresent && isUsefulAppendLine(normalized)) {
-          const ts = new Date().toISOString().slice(0, 10);
-          const line = `- [ ] ${normalized} (added: ${ts})\n`;
-          await writeFile(filePath, existing.trimEnd() + "\n" + line, "utf8");
+        // For overwrite-capable carriers (like self-model): allow overwrite
+        // when existing is empty or stale (>7 days since last update).
+        // Otherwise, append with a conflict marker if content seems different.
+        const allowManagedOverwrite = def.filename === "self-model.md";
+        const isTemplate =
+          allowManagedOverwrite &&
+          (existing.includes("<!-- What is the agent currently trying to accomplish? -->") ||
+            existing.includes("<!-- memory-fabric:begin -->") ||
+            existing.length < 200 ||
+            existing.includes("Not specified"));
+
+        // Check staleness: extract Updated At timestamp from existing content
+        let isStale = false;
+        if (!isTemplate) {
+          const updatedMatch = existing.match(/## Updated At\n(.+)/);
+          if (updatedMatch) {
+            const lastUpdated = new Date(updatedMatch[1].trim()).getTime();
+            const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+            isStale = !isNaN(lastUpdated) && lastUpdated < sevenDaysAgo;
+          }
+        }
+
+        if (allowManagedOverwrite && (isTemplate || isStale)) {
+          // Safe overwrite: existing is unmodified template or >7 days old
+          if (incoming.trim().length > 0) {
+            await writeFile(filePath, incoming, "utf8");
+          }
+        } else {
+          // Append with a conflict marker if content seems different from existing
+          const normalized = incoming.trim();
+          const alreadyPresent = existing.includes(normalized.slice(0, 40));
+          if (!alreadyPresent && isUsefulAppendLine(normalized)) {
+            const ts = new Date().toISOString().slice(0, 10);
+            const line = `- [ ] ${normalized} (added: ${ts})\n`;
+            await writeFile(filePath, existing.trimEnd() + "\n" + line, "utf8");
+          }
         }
         break;
       }

@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "./test-helpers.js";
 import { MemoryCoreV2 } from "../src/core/memory-core-v2.js";
 import { MemoryEntryBuilder } from "../src/models/schema-v2.js";
 
 describe("MemoryCoreV2", () => {
   let core: MemoryCoreV2;
   const testConfig = {
+    mode: "local" as const,
     basePath: "/tmp/memory-core-test",
     targetRoot: "test",
   };
@@ -233,7 +234,9 @@ describe("MemoryCoreV2", () => {
   describe("Events", () => {
     it("should emit events", async () => {
       const events: string[] = [];
-      core.on("created", (e) => events.push(e.entryId));
+      core.on("created", (e) => {
+        events.push(e.entryId);
+      });
 
       const entry = await core.create({ content: "Event test", agentId: "agent-1" });
 

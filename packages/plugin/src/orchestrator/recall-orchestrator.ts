@@ -48,6 +48,10 @@ function detectScope(ctx: RecallContext, cfg: MemoryFabricConfig): MemoryScope {
 
 type MarkerFn = (msg: string) => boolean;
 
+function v2RecallEnabled(): boolean {
+  return process.env.MEMORY_FABRIC_V2_MODE === "v2-recall" || process.env.MEMORY_FABRIC_V2_MODE === "v2-write";
+}
+
 const TASK_TYPE_MARKERS: Array<[TaskType, MarkerFn[]]> = [
   ["code_review", [
     (m) => /\breview\b|PR\b|pull\s*request|diff\b|approve|LGTM/i.test(m),
@@ -155,6 +159,71 @@ export class RecallOrchestrator {
    */
   async execute(ctx: RecallContext): Promise<MemoryBriefResult> {
     const recallPlan = this.plan(ctx);
+
+    if (v2RecallEnabled() && recallPlan.query.trim().length > 0) {
+      try {
+        const v2 = await this.client.recallPlan({
+          agentId: ctx.agentId,
+          projectId: ctx.projectId,
+          scope: recallPlan.scope === "auto" ? undefined : recallPlan.scope,
+          query: recallPlan.query,
+          limit: recallPlan.depth === "l2" ? 8 : 5,
+        });
+        if (v2.cards.length > 0) {
+          const evidence = [...new Set(v2.cards.flatMap((card) => card.evidence))];
+          let legacyForAudit: { sourceCount?: number; budgetUsed?: number; memoryBriefChars?: number } | undefined;
+          try {
+            const legacy = await this.client.recall({
+              agentId: ctx.agentId,
+              projectId: ctx.projectId,
+              scope: recallPlan.scope,
+              depth: recallPlan.depth,
+              query: recallPlan.query,
+              taskType: recallPlan.taskType
+            });
+            legacyForAudit = {
+              sourceCount: legacy.sources.length,
+              budgetUsed: legacy.budgetUsed,
+              memoryBriefChars: legacy.memoryBrief.length
+            };
+          } catch {
+            legacyForAudit = undefined;
+          }
+          const auditClient = this.client as unknown as {
+            recallAudit?: (req: {
+              agentId?: string;
+              projectId?: string;
+              query: string;
+              mode: string;
+              legacy?: { sourceCount?: number; budgetUsed?: number; memoryBriefChars?: number };
+              v2?: { intent?: string; cardCount?: number; evidenceCount?: number; renderedChars?: number; executionTimeMs?: number };
+            }) => Promise<unknown>;
+          };
+          void auditClient.recallAudit?.({
+            agentId: ctx.agentId,
+            projectId: ctx.projectId,
+            query: recallPlan.query,
+            mode: process.env.MEMORY_FABRIC_V2_MODE ?? "off",
+            legacy: legacyForAudit,
+            v2: {
+              intent: v2.plan.intent,
+              cardCount: v2.cards.length,
+              evidenceCount: evidence.length,
+              renderedChars: v2.rendered.length,
+              executionTimeMs: v2.executionTimeMs
+            }
+          }).catch(() => undefined);
+          return {
+            brief: v2.rendered,
+            sources: [`v2:recall-plan:${v2.plan.intent}`, ...evidence.map((ref) => `event:${ref}`)],
+            budgetUsed: Math.ceil(v2.rendered.length / 4),
+            plan: recallPlan
+          };
+        }
+      } catch {
+        // v2 recall is a gray-mode optimization. Fall back to legacy recall.
+      }
+    }
 
     // Primary recall from OpenViking
     const recallResp = await this.client.recall({
