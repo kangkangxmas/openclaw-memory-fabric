@@ -448,13 +448,25 @@ describe("Memory Fabric V2", () => {
       expect(productBody.v2.status).toBe("written");
       expect(productBody.v2.legacyStatus).toBe("written");
       expect(productBody.v2.sourceRefs).toEqual([productBody.v2.eventId]);
-      expect(
-        await waitForCandidates(candidates, {
-          agentId: "product",
-          projectId: "Product",
-          expectedContent: productFact,
-        })
-      ).toHaveLength(2);
+      const productCandidates = await waitForCandidates(candidates, {
+        agentId: "product",
+        projectId: "Product",
+        expectedContent: productFact,
+      });
+      expect(productCandidates).toHaveLength(2);
+
+      const consolidator = new MemoryConsolidator(modeCfg, candidates);
+      const consolidated = await consolidator.run({ agentId: "product", projectId: "Product" });
+      expect(consolidated.promoted).toBe(2);
+
+      const promotedCandidates = await candidates.listAll({ agentId: "product", projectId: "Product" });
+      expect(promotedCandidates.every((candidate) => candidate.status === "promoted")).toBe(true);
+      expect(promotedCandidates.every((candidate) => candidate.reviewReason?.startsWith("merged_duplicate:"))).toBe(true);
+
+      const core = new MemoryCoreV2(modeCfg);
+      const promotedMemory = await core.read(promotedCandidates[0].promotedMemoryId ?? "");
+      expect(promotedMemory?.sourceRefs).toEqual([productBody.v2.eventId]);
+      expect(promotedMemory?.quality?.sourceCoverage).toBe(1);
 
       const developmentRes = await app.inject({
         method: "POST",

@@ -240,6 +240,10 @@ export class MemoryCoreV2 {
     if (updates.metadata) entry.metadata = { ...entry.metadata, ...updates.metadata };
     if (updates.metadata?.tags) entry.metadata.tags = [...new Set([...entry.metadata.tags, ...updates.metadata.tags])];
     if (updates.relations) entry.relations = [...(entry.relations ?? []), ...updates.relations];
+    if (updates.sources) {
+      const sources = [...(entry.sources ?? []), ...updates.sources];
+      entry.sources = Array.from(new Map(sources.map((source) => [`${source.type}:${source.identifier}`, source])).values());
+    }
     if (updates.embedding) entry.embedding = updates.embedding;
     if (updates.blocks) entry.blocks = updates.blocks;
     if (updates.sourceRefs) entry.sourceRefs = updates.sourceRefs;

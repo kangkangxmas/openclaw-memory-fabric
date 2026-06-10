@@ -41,6 +41,15 @@ function aggregateQuality(quality: MemoryQuality): number {
   return (quality.specificity + quality.actionability + quality.stability + quality.sourceCoverage) / 4;
 }
 
+function mergeQuality(left: MemoryQuality | undefined, right: MemoryQuality): MemoryQuality {
+  return {
+    specificity: Math.max(left?.specificity ?? 0, right.specificity),
+    actionability: Math.max(left?.actionability ?? 0, right.actionability),
+    stability: Math.max(left?.stability ?? 0, right.stability),
+    sourceCoverage: Math.max(left?.sourceCoverage ?? 0, right.sourceCoverage),
+  };
+}
+
 function hasExplicitUserDirective(candidate: AtomicMemoryCandidate): boolean {
   return candidate.tags.some((tag) => tag === "explicit_user_instruction" || tag === "user_directive");
 }
@@ -118,8 +127,38 @@ export class MemoryConsolidator {
         limit: 20,
       });
 
+      const now = new Date().toISOString();
       const exactDuplicate = similar.entries.find((entry) => normalize(entry.content) === normalize(candidate.content));
       if (exactDuplicate) {
+        const existingSourceRefs = exactDuplicate.sourceRefs ?? [];
+        const mergedSourceRefs = [...new Set([...existingSourceRefs, ...candidate.sourceRefs])];
+        const addsEvidence = mergedSourceRefs.length > existingSourceRefs.length || (exactDuplicate.quality?.sourceCoverage ?? 0) < 1;
+
+        if (addsEvidence) {
+          const updated = await this.core.update(exactDuplicate.id, {
+            sourceRefs: mergedSourceRefs,
+            sources: candidate.sourceRefs.map((ref) => ({
+              type: "event",
+              identifier: ref,
+              timestamp: now,
+              confidence: candidate.confidence,
+              agentId: candidate.agentId,
+            })),
+            quality: mergeQuality(exactDuplicate.quality, candidate.quality),
+            status: exactDuplicate.status === "retracted" ? exactDuplicate.status : "active",
+            metadata: { tags: candidate.tags },
+          } as Partial<MemoryEntryV2>);
+
+          candidate.status = "promoted";
+          candidate.promotedMemoryId = exactDuplicate.id;
+          candidate.reviewReason = `merged_duplicate:${exactDuplicate.id}`;
+          await this.candidates.update(candidate);
+          await this.recordRelations(candidate, updated ?? exactDuplicate);
+          result.promoted++;
+          result.entries.push({ candidateId: candidate.candidateId, status: candidate.status, memoryId: exactDuplicate.id });
+          continue;
+        }
+
         candidate.status = "rejected";
         candidate.reviewReason = `duplicate:${exactDuplicate.id}`;
         await this.candidates.update(candidate);
@@ -129,7 +168,6 @@ export class MemoryConsolidator {
       }
 
       const superseded = similar.entries.find((entry) => jaccard(entry.content, candidate.content) >= 0.82);
-      const now = new Date().toISOString();
       if (superseded) {
         await this.core.update(superseded.id, {
           status: "superseded",
