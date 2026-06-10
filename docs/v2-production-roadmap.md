@@ -54,6 +54,7 @@
 
 步骤：
 - 设置 `MEMORY_FABRIC_V2_MODE=v2-recall`。
+- 如需自动处理 pending candidates，设置 `MEMORY_FABRIC_CONSOLIDATION_WORKER=auto`，并用 `MEMORY_FABRIC_CONSOLIDATION_AGENT_ID`、`MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID` 限定灰度范围。
 - 保持 sidecar 旧 `/recall`、旧 Carrier、旧 JSONL 全部可用。
 - 每日查看 `/v2/gray/status?agentId=development`，确认 mode、worker、candidate queue、latest bench 和 readiness flags。
 - 每日查看 `/v2/recall/audit`，对比 legacy source count、legacy budget、legacy brief preview、v2 card count、v2 evidence refs、v2 memory ids 和 card previews。

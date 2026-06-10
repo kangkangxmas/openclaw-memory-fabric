@@ -247,6 +247,50 @@ describe("Memory Fabric V2", () => {
     expect(selfModel.content).toContain(`memory:${memory.id}`);
   });
 
+  it("auto-starts the consolidation worker when configured by env", async () => {
+    const previous = {
+      worker: process.env.MEMORY_FABRIC_CONSOLIDATION_WORKER,
+      agentId: process.env.MEMORY_FABRIC_CONSOLIDATION_AGENT_ID,
+      projectId: process.env.MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID,
+      intervalMs: process.env.MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS,
+      limit: process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT,
+    };
+    process.env.MEMORY_FABRIC_CONSOLIDATION_WORKER = "auto";
+    process.env.MEMORY_FABRIC_CONSOLIDATION_AGENT_ID = "development";
+    process.env.MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID = "openclaw";
+    process.env.MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS = "1500";
+    process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT = "7";
+
+    const app = Fastify({ logger: false });
+    try {
+      registerV2Routes(app, cfg);
+      await app.ready();
+      const statusRes = await app.inject({
+        method: "GET",
+        url: "/v2/consolidation/status?agentId=development&projectId=openclaw",
+      });
+      const statusBody = JSON.parse(statusRes.body);
+
+      expect(statusBody.status.running).toBe(true);
+      expect(statusBody.status.agentId).toBe("development");
+      expect(statusBody.status.projectId).toBe("openclaw");
+      expect(statusBody.status.intervalMs).toBe(1500);
+      expect(statusBody.status.limit).toBe(7);
+    } finally {
+      await app.close();
+      if (previous.worker === undefined) delete process.env.MEMORY_FABRIC_CONSOLIDATION_WORKER;
+      else process.env.MEMORY_FABRIC_CONSOLIDATION_WORKER = previous.worker;
+      if (previous.agentId === undefined) delete process.env.MEMORY_FABRIC_CONSOLIDATION_AGENT_ID;
+      else process.env.MEMORY_FABRIC_CONSOLIDATION_AGENT_ID = previous.agentId;
+      if (previous.projectId === undefined) delete process.env.MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID;
+      else process.env.MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID = previous.projectId;
+      if (previous.intervalMs === undefined) delete process.env.MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS;
+      else process.env.MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS = previous.intervalMs;
+      if (previous.limit === undefined) delete process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT;
+      else process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT = previous.limit;
+    }
+  });
+
   it("exposes v2 evidence, consolidation, trace, drift, and bench routes", async () => {
     const app = Fastify({ logger: false });
     const carriers = new CarrierRepository(join(tmpRoot, "carriers"));

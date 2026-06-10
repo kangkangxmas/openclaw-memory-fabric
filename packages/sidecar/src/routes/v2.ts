@@ -71,11 +71,33 @@ export function registerV2Routes(
       ?.split(",")
       .map((item) => item.trim())
       .filter((item): item is AtomicMemoryCandidate["status"] => candidateStatuses.includes(item as AtomicMemoryCandidate["status"]));
+  const parseOptionalNumber = (value: string | undefined): number | undefined => {
+    if (!value) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+  const shouldAutoStartWorker = (): boolean => {
+    const raw = process.env.MEMORY_FABRIC_CONSOLIDATION_WORKER?.toLowerCase();
+    return raw === "auto" || raw === "on" || raw === "true" || raw === "1";
+  };
   const v2Mode = (): "off" | "shadow" | "v2-recall" | "v2-write" => {
     const raw = process.env.MEMORY_FABRIC_V2_MODE;
     if (raw === "off" || raw === "shadow" || raw === "v2-recall" || raw === "v2-write") return raw;
     return "shadow";
   };
+
+  if (shouldAutoStartWorker()) {
+    consolidationWorker.start({
+      agentId: process.env.MEMORY_FABRIC_CONSOLIDATION_AGENT_ID,
+      projectId: process.env.MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID,
+      intervalMs: parseOptionalNumber(process.env.MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS),
+      limit: parseOptionalNumber(process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT),
+    });
+  }
+
+  app.addHook("onClose", () => {
+    consolidationWorker.stop();
+  });
 
   // -------------------------------------------------------------------------
   // POST /v2/events — Append L0 evidence event

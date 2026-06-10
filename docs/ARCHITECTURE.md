@@ -415,6 +415,12 @@ React 18 + Vite + TypeScript + Tailwind CSS 构建的 SPA，通过 `@fastify/sta
 | `HOST` | Sidecar 地址 | `127.0.0.1` |
 | `OPENVIKING_BASE_PATH` | OpenViking 数据根目录 | `~/.openviking/data/viking/openclaw-personal` |
 | `CARRIERS_ROOT` | Carrier 文件根目录 | `~/.memory-fabric/carriers` |
+| `MEMORY_FABRIC_V2_MODE` | v2 灰度模式：`off`、`shadow`、`v2-recall`、`v2-write` | `v2-recall` |
+| `MEMORY_FABRIC_CONSOLIDATION_WORKER` | 是否随 sidecar 自动启动巩固 worker；默认关闭，`auto/on/true/1` 开启 | `auto` |
+| `MEMORY_FABRIC_CONSOLIDATION_AGENT_ID` | 自动 worker 可选 Agent 过滤 | `development` |
+| `MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID` | 自动 worker 可选 Project 过滤 | `openclaw-memory-fabric` |
+| `MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS` | 自动 worker 运行间隔 | `30000` |
+| `MEMORY_FABRIC_CONSOLIDATION_LIMIT` | 自动 worker 每轮处理上限 | `100` |
 
 ### 5.2 可选（经验蒸馏 LLM）
 

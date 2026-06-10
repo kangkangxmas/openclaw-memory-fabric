@@ -205,6 +205,8 @@ Query:
 
 启动后台巩固 worker。
 
+默认不会随 sidecar 启动自动运行。需要开机自动处理 pending candidates 时设置 `MEMORY_FABRIC_CONSOLIDATION_WORKER=auto`，并可选配置 `MEMORY_FABRIC_CONSOLIDATION_AGENT_ID`、`MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID`、`MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS`、`MEMORY_FABRIC_CONSOLIDATION_LIMIT`。
+
 ```json
 {
   "agentId": "development",
