@@ -327,17 +327,29 @@ Query:
 
 ### POST /v2/bench/run
 
-运行 Memory Bench v0，可传自定义 cases。
+运行 Memory Bench v0，可传自定义 cases，或使用已保存的 fixture 文件。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "useFixtures": true,
+  "limit": 50
+}
+```
+
+`useFixtures=false` 且未传 `cases` 时使用内置默认 v0 cases。
 
 ### POST /v2/bench/seed
 
-把默认或自定义 bench cases 灌入 v2 结构化记忆库。接口会为每个 case 写入 L0 event、L1 candidate，并运行 consolidator；重复执行会按 fixture tag 跳过已存在记忆。
+把默认、自定义或已保存 fixture cases 灌入 v2 结构化记忆库。接口会为每个 case 写入 L0 event、L1 candidate，并运行 consolidator；重复执行会按 fixture tag 跳过已存在记忆。
 
 ```json
 {
   "agentId": "development",
   "projectId": "openclaw-memory-fabric",
   "limit": 50,
+  "useFixtures": false,
   "cases": [
     {
       "id": "real-session-001",
@@ -351,6 +363,37 @@ Query:
 ```
 
 Response 包含 `requested`、`skippedExisting`、`createdEvents`、`createdCandidates`、`promoted`、`needsReview`、`rejected` 和 `memoryIds`。
+
+### GET /v2/bench/fixtures
+
+读取已保存的 Bench fixture 文件。
+
+Response:
+
+- `source=persisted|empty`
+- `count`
+- `cases`
+
+### POST /v2/bench/fixtures
+
+保存真实 Bench fixture cases。
+
+```json
+{
+  "mode": "replace",
+  "cases": [
+    {
+      "id": "real-session-001",
+      "query": "继续上次 Memory Fabric v2 改造任务",
+      "expectedTerms": ["v2", "任务", "下一步"],
+      "agentId": "development",
+      "projectId": "openclaw-memory-fabric"
+    }
+  ]
+}
+```
+
+`mode=append` 时按 `id` 去重并覆盖同 id case；`mode=replace` 会替换整个 fixture 文件。
 
 ### GET /v2/bench/report
 

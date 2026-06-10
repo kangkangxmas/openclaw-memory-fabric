@@ -40,7 +40,7 @@
 ### Phase 5：Memory Bench、全量灰度与切主
 
 - `MemoryBenchRunner`：内置 30+ v0 cases，可运行、持久化 latest report 和历史 JSONL。
-- `MemoryBenchFixtureSeeder`：可重复把默认或自定义 bench cases 写入 L0 event、L1 candidate，并触发 consolidator promotion，避免空库 bench 指标失真。
+- `MemoryBenchFixtureSeeder`：可重复把默认、自定义或持久化 fixture cases 写入 L0 event、L1 candidate，并触发 consolidator promotion，避免空库 bench 指标失真。
 - `GET /v2/bench/report`：读取最新报告。
 - `GET /v2/gray/status`：汇总 mode、worker、candidate stats、recall audit、latest bench 和 readiness flags。
 - V2 Inspector：增加 Candidate Review、Consolidation Worker、Carrier Drift、Projection Apply/Rollback、Relation Trace、Bench Report、Bench Seed 和 Gray Status。
@@ -71,8 +71,9 @@
 
 步骤：
 - 从真实 session 中抽取 query、expectedTerms、agentId、projectId。
-- 使用 `POST /v2/bench/seed` 做 fixture seed：先写 L0 events，再写 candidates，再运行 consolidator；重复执行必须跳过已存在 fixture。
-- Bench Runner 固定输出 Recall@5、Injection Precision、Stale Rate、Source Coverage、平均注入 token、P95 latency。
+- 使用 `POST /v2/bench/fixtures` 保存 fixture 文件；`mode=append` 用于持续补 case，`mode=replace` 用于重建基线。
+- 使用 `POST /v2/bench/seed` + `useFixtures=true` 做 fixture seed：先写 L0 events，再写 candidates，再运行 consolidator；重复执行必须跳过已存在 fixture。
+- 使用 `POST /v2/bench/run` + `useFixtures=true` 固定输出 Recall@5、Injection Precision、Stale Rate、Source Coverage、平均注入 token、P95 latency。
 - 每次实现变更后运行同一 fixture，避免空库指标误导。
 
 验收门槛：
@@ -125,6 +126,8 @@
 - `GET /v2/carriers/projection/history`
 - `GET /v2/graph/relations`
 - `GET /v2/gray/status`
+- `GET /v2/bench/fixtures`
+- `POST /v2/bench/fixtures`
 - `POST /v2/bench/seed`
 - `POST /v2/bench/run`
 - `GET /v2/bench/report`

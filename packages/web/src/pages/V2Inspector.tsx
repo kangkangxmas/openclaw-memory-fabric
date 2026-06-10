@@ -8,6 +8,7 @@ import type {
   V2Candidate,
   V2CandidateStats,
   V2ConsolidationStatus,
+  V2BenchFixtureSet,
   V2BenchSeedResult,
   V2GrayStatus,
   V2RecallPlanResponse,
@@ -49,6 +50,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const [projection, setProjection] = useState<V2CarrierProjectionRecord | null>(null);
   const [relations, setRelations] = useState<V2Relation[]>([]);
   const [bench, setBench] = useState<V2BenchReport | null>(null);
+  const [fixtures, setFixtures] = useState<V2BenchFixtureSet | null>(null);
   const [seed, setSeed] = useState<V2BenchSeedResult | null>(null);
   const [gray, setGray] = useState<V2GrayStatus | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
@@ -94,17 +96,19 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const loadOps = async () => {
-    const [candidateRes, statusRes, relationRes, grayRes] = await Promise.all([
+    const [candidateRes, statusRes, relationRes, grayRes, fixtureRes] = await Promise.all([
       api.getV2Candidates(ctx.agentId || undefined, ctx.projectId || undefined),
       api.getV2ConsolidationStatus(ctx.agentId || undefined, ctx.projectId || undefined),
       api.getV2GraphRelations(ctx.agentId || undefined, ctx.projectId || undefined),
       api.getV2GrayStatus(ctx.agentId || undefined, ctx.projectId || undefined),
+      api.getV2BenchFixtures(),
     ]);
     setCandidates(candidateRes.candidates);
     setCandidateStats(statusRes.candidateStats);
     setWorker(statusRes.status);
     setRelations(relationRes.relations);
     setGray(grayRes);
+    setFixtures(fixtureRes);
     if (grayRes.bench) setBench(grayRes.bench);
   };
 
@@ -138,7 +142,20 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const loadBench = async () => {
-    const res = await api.postV2BenchRun();
+    const res = await api.postV2BenchRun({
+      agentId: ctx.agentId || undefined,
+      projectId: ctx.projectId || undefined,
+    });
+    setBench(res.report);
+  };
+
+  const loadFixtureBench = async () => {
+    const res = await api.postV2BenchRun({
+      agentId: ctx.agentId || undefined,
+      projectId: ctx.projectId || undefined,
+      useFixtures: true,
+      limit: 50,
+    });
     setBench(res.report);
   };
 
@@ -147,8 +164,8 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setBench(res.report);
   };
 
-  const seedBench = async () => {
-    const res = await api.postV2BenchSeed(ctx.agentId || undefined, ctx.projectId || undefined);
+  const seedBench = async (useFixtures = false) => {
+    const res = await api.postV2BenchSeed(ctx.agentId || undefined, ctx.projectId || undefined, useFixtures);
     setSeed(res.result);
     await loadOps();
   };
@@ -164,7 +181,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             Source Trace、Carrier Drift、Injection Inspector、Quality Metrics
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <button
             onClick={() => void run("ops", loadOps)}
             disabled={!!loading}
@@ -180,11 +197,25 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             最新 Bench
           </button>
           <button
-            onClick={() => void run("bench-seed", seedBench)}
+            onClick={() => void run("bench-seed", () => seedBench())}
             disabled={!!loading}
             className="px-4 py-2 border border-line rounded-lg text-sm text-ink hover:bg-line/40 disabled:opacity-50"
           >
             Seed Bench
+          </button>
+          <button
+            onClick={() => void run("bench-seed-fixtures", () => seedBench(true))}
+            disabled={!!loading}
+            className="px-4 py-2 border border-line rounded-lg text-sm text-ink hover:bg-line/40 disabled:opacity-50"
+          >
+            Seed Fixtures
+          </button>
+          <button
+            onClick={() => void run("bench-fixtures", loadFixtureBench)}
+            disabled={!!loading}
+            className="px-4 py-2 border border-line rounded-lg text-sm text-ink hover:bg-line/40 disabled:opacity-50"
+          >
+            Fixture Bench
           </button>
           <button
             onClick={() => void run("bench", loadBench)}
@@ -233,6 +264,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             <Metric label="Pending" value={candidateStats?.byStatus.pending ?? 0} />
             <Metric label="Needs Review" value={candidateStats?.byStatus.needs_review ?? 0} />
             <Metric label="Promoted" value={candidateStats?.byStatus.promoted ?? 0} />
+            <Metric label="Fixtures" value={fixtures?.count ?? 0} />
           </div>
           {gray && (
             <div className="mt-3 rounded-lg border border-line bg-bg px-3 py-2 text-xs text-ink">

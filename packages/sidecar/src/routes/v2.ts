@@ -16,7 +16,7 @@ import { MemoryConsolidator } from "../services/memory-consolidator.js";
 import { ConsolidationWorker } from "../services/consolidation-worker.js";
 import { RetrievalPlanner } from "../services/retrieval-planner.js";
 import { CarrierProjectionEngine } from "../services/carrier-projection-engine.js";
-import { MemoryBenchRunner, type MemoryBenchCase } from "../services/memory-bench-runner.js";
+import { MemoryBenchRunner, type MemoryBenchCase, type MemoryBenchRunOptions } from "../services/memory-bench-runner.js";
 import { MemoryBenchFixtureSeeder } from "../services/memory-bench-fixture-seeder.js";
 import { V2RelationGraphService, type V2RelationType } from "../services/v2-relation-graph-service.js";
 import { RecallAuditLogService } from "../services/recall-audit-log-service.js";
@@ -725,9 +725,9 @@ export function registerV2Routes(
   // POST /v2/bench/run — Run Memory Bench v0
   // -------------------------------------------------------------------------
   app.post<{
-    Body: { cases?: MemoryBenchCase[] };
+    Body: MemoryBenchRunOptions;
   }>("/v2/bench/run", async (request) => {
-    const report = await benchRunner.run(request.body?.cases);
+    const report = await benchRunner.run(request.body ?? {});
     return { ok: true, report };
   });
 
@@ -736,10 +736,29 @@ export function registerV2Routes(
     return { ok: true, report };
   });
 
+  app.get("/v2/bench/fixtures", async () => {
+    const fixtures = await benchRunner.fixtures();
+    return { ok: true, ...fixtures };
+  });
+
   app.post<{
-    Body: { agentId?: string; projectId?: string; cases?: MemoryBenchCase[]; limit?: number };
+    Body: { cases: MemoryBenchCase[]; mode?: "replace" | "append" };
+  }>("/v2/bench/fixtures", async (request) => {
+    const fixtures = await benchRunner.saveFixtures({
+      cases: request.body.cases,
+      mode: request.body.mode ?? "replace",
+    });
+    return { ok: true, ...fixtures };
+  });
+
+  app.post<{
+    Body: { agentId?: string; projectId?: string; cases?: MemoryBenchCase[]; limit?: number; useFixtures?: boolean };
   }>("/v2/bench/seed", async (request) => {
-    const result = await benchSeeder.seed(request.body ?? {});
+    const persistedFixtures = request.body?.useFixtures ? await benchRunner.fixtures() : undefined;
+    const result = await benchSeeder.seed({
+      ...(request.body ?? {}),
+      cases: request.body?.cases ?? persistedFixtures?.cases,
+    });
     return { ok: true, result };
   });
 

@@ -25,6 +25,8 @@ import type {
   V2Candidate,
   V2CandidateStats,
   V2ConsolidationStatus,
+  V2BenchCase,
+  V2BenchFixtureSet,
   V2BenchReport,
   V2BenchSeedResult,
   V2GrayStatus,
@@ -201,15 +203,27 @@ export const api = {
       ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
     ),
 
-  postV2BenchRun: () => post<{ ok: boolean; report: V2BenchReport }>("/v2/bench/run", {}),
+  postV2BenchRun: (opts?: {
+    agentId?: string;
+    projectId?: string;
+    limit?: number;
+    useFixtures?: boolean;
+    cases?: V2BenchCase[];
+  }) => post<{ ok: boolean; report: V2BenchReport }>("/v2/bench/run", opts ?? {}),
 
   getV2BenchReport: () => get<{ ok: boolean; report: V2BenchReport | null }>("/v2/bench/report"),
 
-  postV2BenchSeed: (agentId?: string, projectId?: string) =>
+  getV2BenchFixtures: () => get<V2BenchFixtureSet>("/v2/bench/fixtures"),
+
+  postV2BenchFixtures: (cases: V2BenchCase[], mode: "replace" | "append" = "replace") =>
+    post<V2BenchFixtureSet>("/v2/bench/fixtures", { cases, mode }),
+
+  postV2BenchSeed: (agentId?: string, projectId?: string, useFixtures = false) =>
     post<{ ok: boolean; result: V2BenchSeedResult }>("/v2/bench/seed", {
       agentId,
       projectId,
       limit: 50,
+      useFixtures,
     }),
 
   getV2GrayStatus: (agentId?: string, projectId?: string) =>

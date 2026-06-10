@@ -14,6 +14,25 @@ export interface MemoryBenchCase {
   projectId?: string;
 }
 
+export interface MemoryBenchRunOptions {
+  cases?: MemoryBenchCase[];
+  agentId?: string;
+  projectId?: string;
+  limit?: number;
+  useFixtures?: boolean;
+}
+
+export interface MemoryBenchFixtureSet {
+  source: "persisted" | "empty";
+  cases: MemoryBenchCase[];
+  count: number;
+}
+
+export interface MemoryBenchFixtureWriteOptions {
+  cases: MemoryBenchCase[];
+  mode?: "replace" | "append";
+}
+
 export interface MemoryBenchReport {
   generatedAt: string;
   cases: number;
@@ -203,6 +222,7 @@ function percentile(values: number[], p: number): number {
 export class MemoryBenchRunner {
   private readonly latestPath?: string;
   private readonly historyPath?: string;
+  private readonly fixturesPath?: string;
 
   constructor(
     private readonly planner: RetrievalPlanner,
@@ -212,10 +232,12 @@ export class MemoryBenchRunner {
       const root = join(resolveV2BaseDir(cfg), "bench");
       this.latestPath = join(root, "latest-report.json");
       this.historyPath = join(root, "reports.jsonl");
+      this.fixturesPath = join(root, "fixtures.json");
     }
   }
 
-  async run(cases: MemoryBenchCase[] = DEFAULT_MEMORY_BENCH_CASES): Promise<MemoryBenchReport> {
+  async run(input: MemoryBenchCase[] | MemoryBenchRunOptions = DEFAULT_MEMORY_BENCH_CASES): Promise<MemoryBenchReport> {
+    const cases = await this.resolveCases(input);
     const results: MemoryBenchReport["results"] = [];
     let hits = 0;
     let usefulCards = 0;
@@ -277,10 +299,64 @@ export class MemoryBenchRunner {
     return JSON.parse(await readFile(this.latestPath, "utf8")) as MemoryBenchReport;
   }
 
+  async fixtures(): Promise<MemoryBenchFixtureSet> {
+    const cases = await this.loadPersistedFixtures();
+    return { source: cases.length > 0 ? "persisted" : "empty", cases, count: cases.length };
+  }
+
+  async saveFixtures(opts: MemoryBenchFixtureWriteOptions): Promise<MemoryBenchFixtureSet> {
+    if (!this.fixturesPath) {
+      return { source: "empty", cases: [], count: 0 };
+    }
+    const incoming = opts.cases.map((item) => normalizeCase(item)).filter((item) => item.id && item.query);
+    const existing = opts.mode === "append" ? await this.loadPersistedFixtures() : [];
+    const byId = new Map<string, MemoryBenchCase>();
+    for (const item of existing) byId.set(item.id, item);
+    for (const item of incoming) byId.set(item.id, item);
+    const cases = [...byId.values()];
+    await ensureFileDir(this.fixturesPath);
+    await writeFile(this.fixturesPath, JSON.stringify({ version: 1, cases }, null, 2), "utf8");
+    return { source: "persisted", cases, count: cases.length };
+  }
+
   private async persist(report: MemoryBenchReport): Promise<void> {
     if (!this.latestPath || !this.historyPath) return;
     await ensureFileDir(this.latestPath);
     await writeFile(this.latestPath, JSON.stringify(report, null, 2), "utf8");
     await appendJsonl(this.historyPath, report);
   }
+
+  private async resolveCases(input: MemoryBenchCase[] | MemoryBenchRunOptions): Promise<MemoryBenchCase[]> {
+    if (Array.isArray(input)) {
+      return applyRunScope(input, {});
+    }
+    const base = input.cases ?? (input.useFixtures ? await this.loadPersistedFixtures() : DEFAULT_MEMORY_BENCH_CASES);
+    return applyRunScope(base, input);
+  }
+
+  private async loadPersistedFixtures(): Promise<MemoryBenchCase[]> {
+    if (!this.fixturesPath || !existsSync(this.fixturesPath)) return [];
+    const raw = JSON.parse(await readFile(this.fixturesPath, "utf8")) as { cases?: MemoryBenchCase[] } | MemoryBenchCase[];
+    const cases = Array.isArray(raw) ? raw : raw.cases ?? [];
+    return cases.map((item) => normalizeCase(item)).filter((item) => item.id && item.query);
+  }
+}
+
+function normalizeCase(item: MemoryBenchCase): MemoryBenchCase {
+  return {
+    id: item.id,
+    query: item.query,
+    expectedTerms: Array.isArray(item.expectedTerms) ? item.expectedTerms.filter(Boolean) : [],
+    agentId: item.agentId,
+    projectId: item.projectId,
+  };
+}
+
+function applyRunScope(cases: MemoryBenchCase[], opts: Pick<MemoryBenchRunOptions, "agentId" | "projectId" | "limit">): MemoryBenchCase[] {
+  const limit = Math.max(0, Math.min(opts.limit ?? cases.length, 500));
+  return cases.slice(0, limit).map((item) => ({
+    ...normalizeCase(item),
+    agentId: opts.agentId ?? item.agentId,
+    projectId: opts.projectId ?? item.projectId,
+  }));
 }

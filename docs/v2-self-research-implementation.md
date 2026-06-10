@@ -65,7 +65,7 @@ flowchart LR
 - `V2RelationGraphService`：记录 `DECIDES`、`IMPLEMENTS`、`SUPERSEDES`、`CAUSES`、`VALIDATES`、`CONSTRAINS` 关系边。
 - `RecallAuditLogService`：记录 v2-recall 灰度期间 legacy recall 与 v2 recall 的对照日志。
 - `MemoryBenchRunner`：内置 30+ 个 v0 用例，记录 Recall@5、Injection Precision、Stale Rate、Source Coverage、平均注入长度、P95 latency，并持久化 latest report。
-- `MemoryBenchFixtureSeeder`：把 bench cases 可重复写入 L0 event、L1 candidate 并触发 promotion；用于真实灰度前建立稳定 fixture。
+- `MemoryBenchFixtureSeeder`：把默认、自定义或持久化 fixture cases 可重复写入 L0 event、L1 candidate 并触发 promotion；用于真实灰度前建立稳定 fixture。
 
 ## 3. API 基线
 
@@ -87,6 +87,7 @@ flowchart LR
 - `POST /v2/carriers/projection/rollback`：按 projectionId 回滚 Carrier 投影。
 - `GET /v2/carriers/projection/history`：查看投影历史。
 - `GET /v2/graph/relations`：查询 v2 关系图。
+- `GET /v2/bench/fixtures` / `POST /v2/bench/fixtures`：读取和保存真实 Bench fixture 文件。
 - `POST /v2/bench/seed`：把默认或自定义 bench cases 灌入 L0/L1/stable memory。
 - `POST /v2/bench/run`：运行 Memory Bench v0。
 - `GET /v2/bench/report`：读取最新 Bench 报告。
@@ -110,7 +111,7 @@ Carrier 是结构化记忆的 Markdown 投影，不再作为唯一事实源。
 - Source Coverage >= 0.98
 - 实时检索 P95 <= 300ms
 
-Bench 结果反映当前记忆库状态；空库或未灌入基线事实时指标会偏低，应先用真实 Agent 会话或 `POST /v2/bench/seed` 生成稳定记忆。seed 过程必须可重复：已经存在 `bench_fixture:<caseId>` tag 的 stable memory 时跳过该 case。
+Bench 结果反映当前记忆库状态；空库或未灌入基线事实时指标会偏低，应先用真实 Agent 会话生成 fixture，并通过 `POST /v2/bench/fixtures` 保存，再用 `POST /v2/bench/seed` + `useFixtures=true` 生成稳定记忆。seed 过程必须可重复：已经存在 `bench_fixture:<caseId>` tag 的 stable memory 时跳过该 case。
 
 ## 6. 灰度策略
 

@@ -389,6 +389,55 @@ describe("Memory Fabric V2", () => {
     const seedAgainBody = JSON.parse(seedAgainRes.body);
     expect(seedAgainBody.result.skippedExisting).toBe(1);
 
+    const saveFixturesRes = await app.inject({
+      method: "POST",
+      url: "/v2/bench/fixtures",
+      payload: {
+        mode: "replace",
+        cases: [
+          {
+            id: "persisted-fixture-case",
+            agentId: "development",
+            projectId: "openclaw",
+            query: "persisted fixture memory",
+            expectedTerms: ["persisted", "fixture"],
+          },
+        ],
+      },
+    });
+    const saveFixturesBody = JSON.parse(saveFixturesRes.body);
+    expect(saveFixturesBody.count).toBe(1);
+
+    const listFixturesRes = await app.inject({ method: "GET", url: "/v2/bench/fixtures" });
+    const listFixturesBody = JSON.parse(listFixturesRes.body);
+    expect(listFixturesBody.source).toBe("persisted");
+    expect(listFixturesBody.cases[0].id).toBe("persisted-fixture-case");
+
+    const seedFixturesRes = await app.inject({
+      method: "POST",
+      url: "/v2/bench/seed",
+      payload: {
+        agentId: "development",
+        projectId: "openclaw",
+        useFixtures: true,
+      },
+    });
+    const seedFixturesBody = JSON.parse(seedFixturesRes.body);
+    expect(seedFixturesBody.result.requested).toBe(1);
+    expect(seedFixturesBody.result.promoted).toBe(1);
+
+    const fixtureBenchRes = await app.inject({
+      method: "POST",
+      url: "/v2/bench/run",
+      payload: {
+        agentId: "development",
+        projectId: "openclaw",
+        useFixtures: true,
+      },
+    });
+    const fixtureBenchBody = JSON.parse(fixtureBenchRes.body);
+    expect(fixtureBenchBody.report.cases).toBe(1);
+
     const grayStatusRes = await app.inject({
       method: "GET",
       url: "/v2/gray/status?agentId=development&projectId=openclaw",

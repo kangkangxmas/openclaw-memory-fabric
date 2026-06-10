@@ -328,6 +328,21 @@ export interface V2BenchReport {
   }>;
 }
 
+export interface V2BenchCase {
+  id: string;
+  query: string;
+  expectedTerms: string[];
+  agentId?: string;
+  projectId?: string;
+}
+
+export interface V2BenchFixtureSet {
+  ok: boolean;
+  source: "persisted" | "empty";
+  cases: V2BenchCase[];
+  count: number;
+}
+
 export interface V2BenchSeedResult {
   agentId: string;
   projectId?: string;

@@ -529,6 +529,8 @@ React 18 + Vite + TypeScript + Tailwind CSS 构建的 SPA，通过 `@fastify/sta
 | POST | `/v2/carriers/projection/rollback` | 回滚 Carrier projection | v2 Phase 3 |
 | GET | `/v2/carriers/projection/history` | 查询 projection 历史 | v2 Phase 3 |
 | GET | `/v2/graph/relations` | 查询语义关系图 | v2 Phase 4 |
+| GET | `/v2/bench/fixtures` | 读取持久化 Bench fixture 文件 | v2 Milestone B |
+| POST | `/v2/bench/fixtures` | 保存真实 Bench fixture cases | v2 Milestone B |
 | POST | `/v2/bench/seed` | 灌入可重复 Bench fixture | v2 Milestone B |
 | POST | `/v2/bench/run` | 运行 Memory Bench | v2 Phase 5 |
 | GET | `/v2/bench/report` | 读取 latest Bench report | v2 Phase 5 |
