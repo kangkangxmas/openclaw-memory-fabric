@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import type { CommitRequest, CommitResponse } from "../models/index.js";
+import type { CommitResult } from "../services/openviking-service.js";
 import type { OpenVikingService } from "../services/openviking-service.js";
 import type { ExperienceService, PostCommitContext } from "../services/experience-service.js";
 import type { EventLedgerService } from "../services/event-ledger-service.js";
-import type { AtomicMemoryStore } from "../services/atomic-memory-store.js";
+import type { AtomicMemoryCandidate, AtomicMemoryStore } from "../services/atomic-memory-store.js";
 import type { MemoryType } from "../models/schema-v2.js";
 
 type V2Mode = "off" | "shadow" | "v2-recall" | "v2-write";
@@ -31,11 +32,22 @@ function collectCandidates(body: CommitRequest): Array<{ type: MemoryType; conte
   );
 }
 
-async function shadowWriteV2(
+function publishCandidatesFromBody(body: CommitRequest): string[] {
+  return [
+    ...(body.decisions ?? []).slice(0, 2).map((decision) => decision.slice(0, 80)),
+    ...(body.unresolved ?? []).slice(0, 2).map((item) => item.slice(0, 80)),
+  ];
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function writeV2Commit(
   body: CommitRequest,
   eventLedger: EventLedgerService,
   atomicStore: AtomicMemoryStore
-): Promise<void> {
+): Promise<{ eventId: string; candidates: AtomicMemoryCandidate[] }> {
   const candidates = collectCandidates(body);
   const event = await eventLedger.append({
     agentId: body.agentId,
@@ -57,17 +69,22 @@ async function shadowWriteV2(
     },
   });
 
+  const created: AtomicMemoryCandidate[] = [];
   for (const candidate of candidates) {
-    await atomicStore.create({
-      agentId: body.agentId,
-      projectId: body.projectId,
-      type: candidate.type,
-      content: candidate.content,
-      sourceRefs: [event.eventId],
-      confidence: 0.72,
-      tags: candidate.tags,
-    });
+    created.push(
+      await atomicStore.create({
+        agentId: body.agentId,
+        projectId: body.projectId,
+        type: candidate.type,
+        content: candidate.content,
+        sourceRefs: [event.eventId],
+        confidence: 0.72,
+        tags: candidate.tags,
+      })
+    );
   }
+
+  return { eventId: event.eventId, candidates: created };
 }
 
 export function registerCommitRoute(
@@ -98,10 +115,55 @@ export function registerCommitRoute(
       }
     },
     async (request): Promise<CommitResponse> => {
-      const result = await openviking.commitSession(request.body);
+      const mode = v2Mode();
+      const v2ServicesReady = !!eventLedger && !!atomicStore;
+      let v2: CommitResponse["v2"] =
+        mode === "off"
+          ? { mode, status: "off", legacyRole: "primary" }
+          : v2ServicesReady
+            ? undefined
+            : { mode, status: "unavailable", legacyRole: "primary", error: "v2 services are not configured" };
 
-      if (eventLedger && atomicStore && v2Mode() !== "off") {
-        void shadowWriteV2(request.body, eventLedger, atomicStore).catch((error: unknown) => {
+      if (mode === "v2-write" && eventLedger && atomicStore) {
+        try {
+          const write = await writeV2Commit(request.body, eventLedger, atomicStore);
+          v2 = {
+            mode,
+            status: "written",
+            eventId: write.eventId,
+            candidateCount: write.candidates.length,
+            candidateIds: write.candidates.map((candidate) => candidate.candidateId),
+            sourceRefs: [write.eventId],
+            legacyRole: "fallback",
+          };
+        } catch (error: unknown) {
+          v2 = {
+            mode,
+            status: "failed",
+            legacyRole: "primary",
+            error: errorMessage(error),
+          };
+          request.log.error({ error }, "v2-write primary commit failed; falling back to legacy commit");
+        }
+      }
+
+      let result: CommitResult | undefined;
+      try {
+        result = await openviking.commitSession(request.body);
+        if (v2) v2.legacyStatus = "written";
+      } catch (error: unknown) {
+        if (mode === "v2-write" && v2?.status === "written") {
+          request.log.warn({ error }, "legacy fallback commit failed after successful v2-write");
+          v2.legacyStatus = "failed";
+          v2.error = `legacy fallback failed: ${errorMessage(error)}`;
+        } else {
+          throw error;
+        }
+      }
+
+      if ((mode === "shadow" || mode === "v2-recall") && eventLedger && atomicStore) {
+        v2 = { mode, status: "queued", legacyRole: "primary", legacyStatus: "written" };
+        void writeV2Commit(request.body, eventLedger, atomicStore).catch((error: unknown) => {
           request.log.warn({ error }, "v2 shadow-write failed");
         });
       }
@@ -125,8 +187,9 @@ export function registerCommitRoute(
 
       return {
         ok: true,
-        committed: result.committed,
-        publishCandidates: result.publishCandidates
+        committed: result?.committed ?? collectCandidates(request.body).length,
+        publishCandidates: result?.publishCandidates ?? publishCandidatesFromBody(request.body),
+        ...(v2 ? { v2 } : {}),
       };
     }
   );

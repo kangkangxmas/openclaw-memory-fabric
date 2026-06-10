@@ -35,6 +35,17 @@ export interface CommitResponse {
   ok: true;
   committed: number;
   publishCandidates: string[];
+  v2?: {
+    mode: "off" | "shadow" | "v2-recall" | "v2-write";
+    status: "off" | "queued" | "written" | "failed" | "unavailable";
+    eventId?: string;
+    candidateCount?: number;
+    candidateIds?: string[];
+    sourceRefs?: string[];
+    legacyRole?: "primary" | "fallback";
+    legacyStatus?: "written" | "failed";
+    error?: string;
+  };
 }
 
 export interface ErrorResponse {

@@ -178,7 +178,12 @@ Plugin: agent-end hook
      → POST /distill (提取 facts/decisions/patterns...)
      → POST /commit (传 toolCalls/turnCount/sessionSummary)
         │
-        ├─ OpenVikingService.commitSession()  ← 同步返回
+        ├─ v2 mode gate
+        │    ├─ off: 只写 legacy
+        │    ├─ shadow / v2-recall: legacy primary，异步写 L0 event + L1 candidates
+        │    └─ v2-write: 先同步写 L0 event + L1 candidates，再写 legacy JSONL fallback
+        │
+        ├─ OpenVikingService.commitSession()
         │    ├─ 写入 memories.jsonl (各 scope)
         │    ├─ 版本控制: summary.json 乐观锁 (D3)
         │    └─ VectorService.index(entry)  ← 异步 fire-and-forget

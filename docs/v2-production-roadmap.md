@@ -113,9 +113,16 @@ pnpm v2:gray-smoke -- \
 
 步骤：
 - `/commit` 切为 v2-first 时仍保留 legacy JSONL shadow。
+- 每次切换前运行 `pnpm v2:commit-smoke -- --strict`；切到 `v2-write` 后追加 `--require-v2-write`。
 - ConsolidationWorker 默认启动，但只处理 pending，不自动反复处理 needs_review。
 - Candidate review 必须可清空 blocked 状态。
 - Carrier projection 只由稳定 memories apply，直接 patch 必须有投影所有权标记，且每次 apply 可 rollback。
+
+验收：
+- `/commit` response 的 `v2.status` 在 `v2-write` 下必须为 `written`。
+- 新写入 candidates 必须都有 `sourceRefs`。
+- `/v2/consolidation/run` 后能通过 `/v2/recall/plan` 召回 memory cards。
+- 旧 `/recall` 仍能召回 legacy JSONL 内容。
 
 回退方式：
 - `MEMORY_FABRIC_V2_MODE=shadow`：恢复 legacy recall 注入，保留 v2 shadow-write。

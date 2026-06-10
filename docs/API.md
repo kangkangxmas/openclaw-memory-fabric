@@ -55,11 +55,21 @@ Base URL: `http://127.0.0.1:7811`
 {
   "ok": true,
   "committed": 5,
-  "publishCandidates": []
+  "publishCandidates": [],
+  "v2": {
+    "mode": "v2-write",
+    "status": "written",
+    "eventId": "evt_...",
+    "candidateCount": 5,
+    "candidateIds": ["cand_..."],
+    "sourceRefs": ["evt_..."],
+    "legacyRole": "fallback",
+    "legacyStatus": "written"
+  }
 }
 ```
 
-> `toolCalls` 和 `turnCount` 用于触发经验蒸馏的条件判断。
+> `toolCalls` 和 `turnCount` 用于触发经验蒸馏的条件判断。`v2` 字段为可选兼容扩展：`off` 不写 v2；`shadow` 和 `v2-recall` 返回 `queued` 并异步写 L0/L1；`v2-write` 先同步写 L0 event 和 L1 candidates，再写 legacy JSONL 作为 fallback。
 
 ---
 

@@ -11,7 +11,23 @@ import { MemoryCoreV2 } from "../src/core/memory-core-v2.js";
 import { RetrievalPlanner } from "../src/services/retrieval-planner.js";
 import { CarrierRepository } from "../src/services/carrier-service.js";
 import { CarrierProjectionEngine } from "../src/services/carrier-projection-engine.js";
+import { OpenVikingService } from "../src/services/openviking-service.js";
+import { registerCommitRoute } from "../src/routes/commit.js";
 import { registerV2Routes } from "../src/routes/v2.js";
+
+async function waitForCandidates(
+  store: AtomicMemoryStore,
+  opts: { agentId: string; projectId?: string; expectedContent: string; timeoutMs?: number }
+) {
+  const deadline = Date.now() + (opts.timeoutMs ?? 1000);
+  let latest = await store.listAll({ agentId: opts.agentId, projectId: opts.projectId, limit: 100 });
+  while (Date.now() < deadline) {
+    latest = await store.listAll({ agentId: opts.agentId, projectId: opts.projectId, limit: 100 });
+    if (latest.some((candidate) => candidate.content === opts.expectedContent)) return latest;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return latest;
+}
 
 describe("Memory Fabric V2", () => {
   let tmpRoot: string;
@@ -288,6 +304,123 @@ describe("Memory Fabric V2", () => {
       else process.env.MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS = previous.intervalMs;
       if (previous.limit === undefined) delete process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT;
       else process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT = previous.limit;
+    }
+  });
+
+  it("exposes commit mode preflight status for off, shadow, v2-recall, and v2-write", async () => {
+    const previousMode = process.env.MEMORY_FABRIC_V2_MODE;
+    const modes = ["off", "shadow", "v2-recall", "v2-write"] as const;
+
+    try {
+      for (const mode of modes) {
+        process.env.MEMORY_FABRIC_V2_MODE = mode;
+        const modeRoot = await mkdtemp(join(tmpRoot, `commit-${mode}-`));
+        const modeCfg = {
+          mode: "local" as const,
+          basePath: join(modeRoot, "openviking"),
+          targetRoot: "viking://org/test",
+        };
+        const openviking = new OpenVikingService(modeCfg);
+        const ledger = new EventLedgerService(modeCfg);
+        const candidates = new AtomicMemoryStore(modeCfg);
+        const app = Fastify({ logger: false });
+        registerCommitRoute(app, openviking, undefined, ledger, candidates);
+        await app.ready();
+
+        const fact = `commit preflight ${mode} fact`;
+        const decision = `commit preflight ${mode} decision`;
+        const res = await app.inject({
+          method: "POST",
+          url: "/commit",
+          payload: {
+            agentId: "development",
+            projectId: "openclaw",
+            facts: [fact],
+            decisions: [decision],
+            sessionSummary: `commit preflight ${mode}`,
+          },
+        });
+        const body = JSON.parse(res.body);
+
+        expect(res.statusCode).toBe(200);
+        expect(body.ok).toBe(true);
+        expect(body.committed).toBe(2);
+        expect(body.v2.mode).toBe(mode);
+
+        if (mode === "off") {
+          expect(body.v2.status).toBe("off");
+          expect((await candidates.listAll({ agentId: "development", projectId: "openclaw" }))).toHaveLength(0);
+        } else {
+          if (mode === "v2-write") {
+            expect(body.v2.status).toBe("written");
+            expect(body.v2.candidateCount).toBe(2);
+            expect(body.v2.sourceRefs).toEqual([body.v2.eventId]);
+          } else {
+            expect(body.v2.status).toBe("queued");
+          }
+
+          const writtenCandidates = await waitForCandidates(candidates, {
+            agentId: "development",
+            projectId: "openclaw",
+            expectedContent: fact,
+          });
+          expect(writtenCandidates).toHaveLength(2);
+          expect(writtenCandidates.every((candidate) => candidate.sourceRefs.length === 1)).toBe(true);
+        }
+
+        const recall = await openviking.recallMemory({
+          agentId: "development",
+          projectId: "openclaw",
+          scope: "project",
+          query: decision,
+        });
+        expect(recall.memoryBrief).toContain(decision);
+        await app.close();
+      }
+    } finally {
+      if (previousMode === undefined) delete process.env.MEMORY_FABRIC_V2_MODE;
+      else process.env.MEMORY_FABRIC_V2_MODE = previousMode;
+    }
+  });
+
+  it("keeps v2-write commits successful when legacy fallback write fails", async () => {
+    const previousMode = process.env.MEMORY_FABRIC_V2_MODE;
+    process.env.MEMORY_FABRIC_V2_MODE = "v2-write";
+    const ledger = new EventLedgerService(cfg);
+    const candidates = new AtomicMemoryStore(cfg);
+    const app = Fastify({ logger: false });
+    const failingOpenViking = {
+      async commitSession() {
+        throw new Error("legacy unavailable");
+      },
+    } as unknown as OpenVikingService;
+
+    try {
+      registerCommitRoute(app, failingOpenViking, undefined, ledger, candidates);
+      await app.ready();
+      const res = await app.inject({
+        method: "POST",
+        url: "/commit",
+        payload: {
+          agentId: "development",
+          projectId: "openclaw",
+          decisions: ["v2-write should survive legacy fallback failure"],
+        },
+      });
+      const body = JSON.parse(res.body);
+      const writtenCandidates = await candidates.listAll({ agentId: "development", projectId: "openclaw" });
+
+      expect(res.statusCode).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.v2.status).toBe("written");
+      expect(body.v2.legacyStatus).toBe("failed");
+      expect(body.v2.error).toContain("legacy fallback failed");
+      expect(writtenCandidates).toHaveLength(1);
+      expect(writtenCandidates[0].sourceRefs).toEqual([body.v2.eventId]);
+    } finally {
+      await app.close();
+      if (previousMode === undefined) delete process.env.MEMORY_FABRIC_V2_MODE;
+      else process.env.MEMORY_FABRIC_V2_MODE = previousMode;
     }
   });
 
