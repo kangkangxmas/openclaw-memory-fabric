@@ -218,6 +218,14 @@ pnpm v2:canary-monitor -- \
 - `needs_review` 或 `rejected` 开始出现，需要人工解释和处理。
 - 准备把第二个 Agent 加入 `v2-write` 前，需要可视化证据链。
 
+当前已启动第 3 项 Web 巡检台改造：
+
+- V2 Inspector 顶部接入 `GET /v2/canary/status`，默认先看只读 canary summary。
+- Candidate Review 支持按状态筛选、查看 sourceRefs 数量、从 promoted memory 直达 Source Trace。
+- Source Trace 从 raw JSON 升级为结构化证据链视图，覆盖 L0 events、source metadata 和 relation trace。
+- Bench seed / fixture seed 已从顶部主操作移到 Bench Tools，降低误写真实 Agent 的风险。
+- 详细 Web 审计和后续优化项见 `docs/web-v2-inspector-audit.md`。
+
 第 4 项（Carrier 投影治理）建议在 Inspector 可解释性可用后启动；不要早于 Source Trace / Candidate Review。进入条件：
 
 - v2-write canary 连续 48 小时没有 pending/needs_review 堆积。

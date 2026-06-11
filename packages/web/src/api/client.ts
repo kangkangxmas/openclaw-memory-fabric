@@ -30,6 +30,7 @@ import type {
   V2BenchFixtureSet,
   V2BenchReport,
   V2BenchSeedResult,
+  V2CanaryStatus,
   V2GrayStatus,
   V2Relation,
 } from "../types";
@@ -241,6 +242,19 @@ export const api = {
       `/v2/gray/status${[
         agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
         projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
+
+  getV2CanaryStatus: (opts?: {
+    agentId?: string;
+    projectId?: string;
+    expectedMode?: string;
+  }) =>
+    get<V2CanaryStatus>(
+      `/v2/canary/status${[
+        opts?.agentId ? `agentId=${encodeURIComponent(opts.agentId)}` : "",
+        opts?.projectId ? `projectId=${encodeURIComponent(opts.projectId)}` : "",
+        opts?.expectedMode ? `expectedMode=${encodeURIComponent(opts.expectedMode)}` : "",
       ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
     ),
 };

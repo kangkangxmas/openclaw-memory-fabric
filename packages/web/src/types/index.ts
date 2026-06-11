@@ -407,6 +407,34 @@ export interface V2GrayStatus {
   };
 }
 
+export interface V2CanaryCheck {
+  id: string;
+  status: "pass" | "warn" | "fail";
+  message: string;
+  value?: unknown;
+}
+
+export interface V2CanaryStatus {
+  ok: boolean;
+  status: "ready" | "warn" | "fail";
+  mode: "off" | "shadow" | "v2-recall" | "v2-write";
+  expectedMode?: string;
+  agentId: string;
+  projectId?: string;
+  worker: V2ConsolidationStatus;
+  candidateStats: V2CandidateStats;
+  candidateSourceCoverage: number;
+  recallAudit: {
+    count: number;
+    lastAt?: string;
+    avgV2CardCount: number;
+    avgV2EvidenceCount: number;
+    avgV2ExecutionTimeMs: number;
+  };
+  bench: V2BenchReport | null;
+  checks: V2CanaryCheck[];
+}
+
 export type Page =
   | "overview"
   | "memory"
