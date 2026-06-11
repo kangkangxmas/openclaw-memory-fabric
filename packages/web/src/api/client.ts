@@ -174,6 +174,19 @@ export const api = {
       { agentId, decision, reviewedBy: "inspector", reason },
     ),
 
+  retryV2Candidates: (
+    agentId?: string,
+    projectId?: string,
+    statuses?: V2Candidate["status"][],
+    limit = 100,
+  ) =>
+    post<{ ok: boolean; candidates: V2Candidate[]; count: number }>("/v2/memories/candidates/retry", {
+      agentId,
+      projectId,
+      statuses,
+      limit,
+    }),
+
   getV2ConsolidationStatus: (agentId?: string, projectId?: string) =>
     get<{ ok: boolean; status: V2ConsolidationStatus; candidateStats: V2CandidateStats }>(
       `/v2/consolidation/status${[

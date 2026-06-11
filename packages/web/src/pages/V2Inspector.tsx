@@ -14,7 +14,6 @@ import type {
   V2GrayStatus,
   V2RecallAuditEntry,
   V2RecallPlanResponse,
-  V2Relation,
   V2TraceResponse,
 } from "../types";
 import { api } from "../api/client";
@@ -30,9 +29,12 @@ interface V2InspectorProps {
 }
 
 type CandidateFilter = V2Candidate["status"] | "all";
+type CandidateRetryStatus = Extract<V2Candidate["status"], "needs_review" | "rejected">;
+type CandidateSort = "updated_desc" | "confidence_asc" | "source_refs_asc";
 type TraceRecord = Record<string, unknown>;
 
 const candidateFilters: CandidateFilter[] = ["all", "pending", "needs_review", "rejected", "promoted"];
+const candidateSorts: CandidateSort[] = ["updated_desc", "confidence_asc", "source_refs_asc"];
 
 function pct(value: number): string {
   return `${Math.round(value * 100)}%`;
@@ -62,6 +64,10 @@ function textField(record: TraceRecord | undefined, keys: string[]): string {
   return "";
 }
 
+function isCandidateRetryStatus(status: CandidateFilter): status is CandidateRetryStatus {
+  return status === "needs_review" || status === "rejected";
+}
+
 function jsonPreview(value: unknown, limit = 240): string {
   if (value === undefined || value === null) return "";
   if (typeof value === "string") return clip(value, limit);
@@ -85,7 +91,7 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-lg border border-line bg-deep px-3 py-2">
       <div className="text-xs text-muted">{label}</div>
-      <div className="mt-1 text-lg font-bold text-ink">{value}</div>
+      <div className="mt-1 break-words text-lg font-bold text-ink">{value}</div>
     </div>
   );
 }
@@ -107,10 +113,11 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const [drift, setDrift] = useState<V2CarrierDriftReport | null>(null);
   const [candidates, setCandidates] = useState<V2Candidate[]>([]);
   const [candidateFilter, setCandidateFilter] = useState<CandidateFilter>("all");
+  const [candidateSearch, setCandidateSearch] = useState("");
+  const [candidateSort, setCandidateSort] = useState<CandidateSort>("updated_desc");
   const [candidateStats, setCandidateStats] = useState<V2CandidateStats | null>(null);
   const [worker, setWorker] = useState<V2ConsolidationStatus | null>(null);
   const [projection, setProjection] = useState<V2CarrierProjectionRecord | null>(null);
-  const [relations, setRelations] = useState<V2Relation[]>([]);
   const [bench, setBench] = useState<V2BenchReport | null>(null);
   const [fixtures, setFixtures] = useState<V2BenchFixtureSet | null>(null);
   const [seed, setSeed] = useState<V2BenchSeedResult | null>(null);
@@ -163,10 +170,9 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const loadOps = async () => {
     const agentId = ctx.agentId || undefined;
     const projectId = ctx.projectId || undefined;
-    const [candidateRes, statusRes, relationRes, grayRes, fixtureRes, auditRes, canaryRes] = await Promise.all([
+    const [candidateRes, statusRes, grayRes, fixtureRes, auditRes, canaryRes] = await Promise.all([
       api.getV2Candidates(agentId, projectId),
       api.getV2ConsolidationStatus(agentId, projectId),
-      api.getV2GraphRelations(agentId, projectId),
       api.getV2GrayStatus(agentId, projectId),
       api.getV2BenchFixtures(),
       api.getV2RecallAudit(agentId, projectId, 12),
@@ -175,7 +181,6 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setCandidates(candidateRes.candidates);
     setCandidateStats(statusRes.candidateStats);
     setWorker(statusRes.status);
-    setRelations(relationRes.relations);
     setGray(grayRes);
     setFixtures(fixtureRes);
     setRecallAudit(auditRes.entries);
@@ -191,7 +196,18 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   }, [ctx.agentId, ctx.projectId]);
 
   const reviewCandidate = async (candidate: V2Candidate, decision: "approve" | "reject") => {
+    const messageKey = decision === "approve" ? "v2.confirm.approveCandidate" : "v2.confirm.rejectCandidate";
+    if (!window.confirm(`${t(messageKey)}\n${candidate.candidateId}`)) return;
     await api.reviewV2Candidate(candidate.candidateId, decision, candidate.agentId);
+    await loadOps();
+  };
+
+  const retryCandidates = async () => {
+    const statuses: CandidateRetryStatus[] =
+      candidateFilter === "all" ? ["needs_review", "rejected"] : isCandidateRetryStatus(candidateFilter) ? [candidateFilter] : [];
+    if (statuses.length === 0) return;
+    if (!window.confirm(t("v2.confirm.retryCandidates"))) return;
+    await api.retryV2Candidates(ctx.agentId || undefined, ctx.projectId || undefined, statuses, 100);
     await loadOps();
   };
 
@@ -202,6 +218,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const stopWorker = async () => {
+    if (!window.confirm(t("v2.confirm.stopWorker"))) return;
     const res = await api.stopV2ConsolidationWorker();
     setWorker(res.status);
     await loadOps();
@@ -209,6 +226,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
 
   const applyProjection = async () => {
     if (!ctx.agentId) return;
+    if (!window.confirm(t("v2.confirm.applyProjection"))) return;
     const res = await api.applyV2CarrierProjection(ctx.agentId, ctx.projectId || undefined);
     setProjection(res.projection);
     await loadDrift();
@@ -216,6 +234,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
 
   const rollbackProjection = async () => {
     if (!projection) return;
+    if (!window.confirm(t("v2.confirm.rollbackProjection"))) return;
     const res = await api.rollbackV2CarrierProjection(projection.projectionId);
     setProjection(res.projection);
     await loadDrift();
@@ -245,12 +264,22 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const seedBench = async (useFixtures = false) => {
+    if (!window.confirm(t(useFixtures ? "v2.confirm.seedFixtures" : "v2.confirm.seedBench"))) return;
     const res = await api.postV2BenchSeed(ctx.agentId || undefined, ctx.projectId || undefined, useFixtures);
     setSeed(res.result);
     await loadOps();
   };
 
   const conflictCards = (recall?.cards ?? []).filter((card) => card.conflict);
+  const reviewReasonCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const candidate of candidates) {
+      if (!candidate.reviewReason) continue;
+      counts.set(candidate.reviewReason, (counts.get(candidate.reviewReason) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  }, [candidates]);
+
   const sortedCandidates = useMemo(() => {
     const priority: Record<V2Candidate["status"], number> = {
       needs_review: 0,
@@ -258,19 +287,66 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       rejected: 2,
       promoted: 3,
     };
+    const search = candidateSearch.trim().toLowerCase();
     return [...candidates]
       .filter((candidate) => candidateFilter === "all" || candidate.status === candidateFilter)
+      .filter((candidate) => {
+        if (!search) return true;
+        return [
+          candidate.candidateId,
+          candidate.agentId,
+          candidate.projectId ?? "",
+          candidate.type,
+          candidate.status,
+          candidate.content,
+          candidate.reviewReason ?? "",
+          candidate.promotedMemoryId ?? "",
+          ...candidate.tags,
+          ...candidate.sourceRefs,
+        ].join("\n").toLowerCase().includes(search);
+      })
       .sort((a, b) => {
         const statusDelta = priority[a.status] - priority[b.status];
         if (statusDelta !== 0) return statusDelta;
+        if (candidateSort === "confidence_asc") return a.confidence - b.confidence;
+        if (candidateSort === "source_refs_asc") return a.sourceRefs.length - b.sourceRefs.length;
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       });
-  }, [candidateFilter, candidates]);
+  }, [candidateFilter, candidateSearch, candidateSort, candidates]);
 
   const traceEvents = trace?.events ?? [];
   const traceSources = trace?.sources ?? [];
-  const traceRelations = trace?.relations ?? relations;
+  const traceRelations = trace?.relations ?? [];
   const failingChecks = canary?.checks.filter((check) => check.status !== "pass") ?? [];
+  const traceEventIds = new Set(traceEvents.map((event) => textField(event, ["eventId", "event_id", "id"])).filter(Boolean));
+  const missingTraceEventRefs = trace?.sourceRefs.filter((ref) => !traceEventIds.has(ref)) ?? [];
+  const traceHealthIssues = trace
+    ? [
+        ...(trace.sourceRefs.length === 0
+          ? [{ id: "sourceRefs", status: "fail", message: t("v2.trace.health.sourceRefsMissing") }]
+          : []),
+        ...(trace.sourceRefs.length > 0 && traceEvents.length === 0
+          ? [{ id: "events", status: "fail", message: t("v2.trace.health.eventsMissing") }]
+          : []),
+        ...(missingTraceEventRefs.length > 0
+          ? [{
+              id: "eventRefs",
+              status: "fail",
+              message: `${t("v2.trace.health.eventsMissingRefs")}: ${missingTraceEventRefs.slice(0, 4).join(", ")}`,
+            }]
+          : []),
+        ...(trace.sourceRefs.length > 0 && traceSources.length === 0
+          ? [{ id: "sources", status: "warn", message: t("v2.trace.health.sourcesMissing") }]
+          : []),
+        ...(traceRelations.length === 0
+          ? [{ id: "relations", status: "warn", message: t("v2.trace.health.relationsMissing") }]
+          : []),
+      ]
+    : [];
+  const selectedContext = `${ctx.agentId || "-"} / ${ctx.projectId || "-"}`;
+  const canaryContext = `${CANARY_AGENT_ID} / ${CANARY_PROJECT_ID}`;
+  const workerContext = `${worker?.agentId ?? "-"} / ${worker?.projectId ?? "-"}`;
+  const selectedDiffersFromCanary = !!ctx.agentId && (ctx.agentId !== CANARY_AGENT_ID || (ctx.projectId || "") !== CANARY_PROJECT_ID);
 
   return (
     <div className="space-y-5">
@@ -303,6 +379,26 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
           {error}
         </div>
       )}
+
+      <section className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <div className="text-sm font-bold text-ink">{t("v2.context.title")}</div>
+            <div className="mt-1 text-xs text-muted">{t("v2.context.desc")}</div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:min-w-[760px] xl:grid-cols-4">
+            <Metric label={t("v2.context.selected")} value={selectedContext} />
+            <Metric label={t("v2.context.canary")} value={canaryContext} />
+            <Metric label={t("v2.context.mode")} value={canary?.mode ?? gray?.mode ?? "-"} />
+            <Metric label={t("v2.context.worker")} value={workerContext} />
+          </div>
+        </div>
+        {selectedDiffersFromCanary && (
+          <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+            {t("v2.context.mismatch")}
+          </div>
+        )}
+      </section>
 
       <section className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -441,6 +537,44 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                 </button>
               </div>
             </div>
+          </div>
+          <div className="border-b border-line px-4 py-3">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+              <input
+                type="search"
+                value={candidateSearch}
+                onChange={(event) => setCandidateSearch(event.target.value)}
+                placeholder={t("v2.candidate.search")}
+                className="min-w-0 flex-1 rounded-lg border border-line bg-deep px-3 py-2 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              <select
+                value={candidateSort}
+                onChange={(event) => setCandidateSort(event.target.value as CandidateSort)}
+                className="rounded-lg border border-line bg-deep px-3 py-2 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                {candidateSorts.map((sort) => (
+                  <option key={sort} value={sort}>
+                    {t(`v2.candidate.sort.${sort}`)}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => void run("candidate-retry", retryCandidates)}
+                disabled={!!loading || candidateFilter === "pending" || candidateFilter === "promoted"}
+                className="px-3 py-2 border border-amber-400/40 rounded-lg text-xs text-amber-200 disabled:opacity-50"
+              >
+                {t("v2.candidate.retry")}
+              </button>
+            </div>
+            {reviewReasonCounts.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {reviewReasonCounts.map(([reason, count]) => (
+                  <span key={reason} className="rounded border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-xs text-amber-200">
+                    {reason}: {count}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
           <div className="max-h-[420px] overflow-auto">
             <table className="w-full text-xs">
@@ -741,22 +875,33 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   </div>
                 </div>
 
+                {traceHealthIssues.length > 0 && (
+                  <div className="grid gap-2 lg:grid-cols-2">
+                    {traceHealthIssues.map((issue) => (
+                      <div key={issue.id} className={`rounded-lg border px-3 py-2 text-xs ${statusBadgeClass(issue.status)}`}>
+                        <div className="font-mono text-[11px] uppercase">{issue.id}</div>
+                        <div className="mt-1">{issue.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div className="rounded-lg border border-line overflow-hidden">
                   <div className="border-b border-line px-3 py-2 text-xs font-bold text-ink">
                     L0 Events
                   </div>
                   <div className="max-h-72 overflow-auto divide-y divide-line/50">
                     {traceEvents.map((event, index) => (
-                      <div key={textField(event, ["eventId"]) || index} className="px-3 py-3 text-xs">
+                      <div key={textField(event, ["eventId", "event_id", "id"]) || index} className="px-3 py-3 text-xs">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-muted">{textField(event, ["eventId"]) || `event-${index + 1}`}</span>
-                          <CompactBadge>{textField(event, ["sourceType"]) || "event"}</CompactBadge>
-                          <span className="text-muted">{formatTime(textField(event, ["occurredAt"]))}</span>
+                          <span className="font-mono text-muted">{textField(event, ["eventId", "event_id", "id"]) || `event-${index + 1}`}</span>
+                          <CompactBadge>{textField(event, ["sourceType", "source_type"]) || "event"}</CompactBadge>
+                          <span className="text-muted">{formatTime(textField(event, ["occurredAt", "occurred_at"]))}</span>
                         </div>
-                        <div className="mt-2 text-ink">{textField(event, ["summary"]) || jsonPreview(event, 160)}</div>
+                        <div className="mt-2 text-ink">{textField(event, ["summary", "content"]) || jsonPreview(event, 160)}</div>
                         <div className="mt-2 grid gap-1 text-muted sm:grid-cols-2">
-                          <span className="font-mono">hash {clip(textField(event, ["contentHash"]), 48)}</span>
-                          <span className="font-mono">uri {textField(event, ["sourceUri"]) || "-"}</span>
+                          <span className="font-mono">hash {clip(textField(event, ["contentHash", "content_hash"]), 48)}</span>
+                          <span className="font-mono">uri {textField(event, ["sourceUri", "source_uri"]) || "-"}</span>
                         </div>
                         {event.payload !== undefined && (
                           <details className="mt-2">
@@ -769,7 +914,9 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                       </div>
                     ))}
                     {traceEvents.length === 0 && (
-                      <div className="px-3 py-6 text-center text-sm text-muted">{t("v2.events.empty")}</div>
+                      <div className={`px-3 py-6 text-center text-sm ${trace.sourceRefs.length > 0 ? "bg-red-400/10 text-red-200" : "text-muted"}`}>
+                        {t("v2.events.empty")}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -787,7 +934,9 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                         </div>
                       ))}
                       {traceSources.length === 0 && (
-                        <div className="px-3 py-6 text-center text-sm text-muted">{t("v2.sources.empty")}</div>
+                        <div className={`px-3 py-6 text-center text-sm ${trace.sourceRefs.length > 0 ? "bg-amber-400/10 text-amber-200" : "text-muted"}`}>
+                          {t("v2.sources.empty")}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -806,7 +955,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                         </div>
                       ))}
                       {traceRelations.length === 0 && (
-                        <div className="px-3 py-6 text-center text-sm text-muted">{t("v2.relations.empty")}</div>
+                        <div className="px-3 py-6 text-center text-sm bg-amber-400/10 text-amber-200">{t("v2.relations.empty")}</div>
                       )}
                     </div>
                   </div>

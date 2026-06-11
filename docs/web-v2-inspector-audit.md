@@ -16,22 +16,24 @@
 - Source Trace 从原始 JSON 改为结构化视图：`memoryId/status`、`sourceRefs`、L0 events、source metadata、relation trace，并保留 raw JSON 调试入口。
 - Recall Audit 中 v2 memory ids 可直接跳转 Source Trace。
 - Bench seed / fixture seed 从顶部主操作移入 Bench Tools，降低真实 Agent 被误写 fixture 记忆的风险。
+- V2 Inspector 增加固定运行上下文状态条：明确左侧全局上下文、棱镜 canary 范围、当前模式和 worker 范围。
+- 所有会写入或回滚数据的高风险按钮增加二次确认：candidate approve/reject、candidate retry、projection apply/rollback、worker stop、bench seed/fixture seed。
+- Candidate Review 增加搜索、排序、失败原因聚合和 `POST /v2/memories/candidates/retry` 的受控入口；retry 仅覆盖 `needs_review/rejected`。
+- Source Trace 对缺失 `sourceRefs`、缺失 L0 events、`sourceRefs` 找不到 event、缺 source metadata、缺 relation trace 给出红色或黄色状态。
 
 ## 还需要优化的 Web 功能
 
 ### P0：灰度运维安全
 
-- 为所有会写入或回滚数据的按钮增加二次确认：`Seed Bench`、`Seed Fixtures`、`Projection Apply`、`Projection Rollback`、`Worker Stop`。
-- 将当前 Agent / Project / Mode 做成固定状态条，避免用户在错误 Agent 上执行 review 或 projection。
-- Candidate Review 增加批量 retry 和失败原因聚合视图，对应 `POST /v2/memories/candidates/retry`。
-- Source Trace 对缺失 event、缺失 sourceRefs、sourceRefs 指向不存在 event 的情况给出显式红色状态。
+- 已完成：二次确认、固定运行上下文状态条、Candidate retry/搜索/排序/失败聚合、Source Trace 缺失证据状态。
+- 剩余：把 projection apply/rollback 从按钮确认升级为 patch diff 审阅；这应放入 Carrier 投影治理阶段统一实现。
 
 ### P1：可解释性与效率
 
 - Injection Inspector 增加 plan 展开：intent、weights、filters、RRF ranking 和被过滤原因。
 - Relation Trace 增加按 relation type 过滤，以及 `memory -> event -> relation -> carrier` 的路径视图。
 - Recall Audit 增加 legacy/v2 对比详情抽屉，展示 legacy sources、v2 evidence refs、card previews 和 latency。
-- Candidate 表支持搜索、按 type/confidence/sourceRefs 排序，并保留最近筛选条件。
+- Candidate 表保留最近筛选条件；搜索、按 confidence/sourceRefs 排序已完成。
 
 ### P2：生产运维面板
 
