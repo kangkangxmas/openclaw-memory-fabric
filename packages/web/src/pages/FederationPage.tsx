@@ -6,6 +6,8 @@ import type {
   ApprovalEntry,
 } from "../types";
 import { api } from "../api/client";
+import { PageHeader } from "../components/PageHeader";
+import { useI18n } from "../i18n";
 
 interface FederationPageProps {
   ctx: AppContext;
@@ -14,6 +16,7 @@ interface FederationPageProps {
 type Tab = "imports" | "dependencies" | "approvals";
 
 export function FederationPage({ ctx }: FederationPageProps) {
+  const { language, t } = useI18n();
   const [tab, setTab] = useState<Tab>("imports");
   const [imports, setImports] = useState<FederationEntry[]>([]);
   const [deps, setDeps] = useState<DependencyGraph | null>(null);
@@ -59,24 +62,24 @@ export function FederationPage({ ctx }: FederationPageProps) {
   };
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: "imports", label: "联邦导入" },
-    { key: "dependencies", label: "项目依赖" },
-    { key: "approvals", label: "待审批" },
+    { key: "imports", label: t("federation.tab.imports") },
+    { key: "dependencies", label: t("federation.tab.dependencies") },
+    { key: "approvals", label: t("federation.tab.approvals") },
   ];
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-ink">联邦管理</h1>
+      <PageHeader title={t("federation.title")} description={t("federation.desc")} eyebrow="Memory Governance" />
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-bg rounded-lg p-1 border border-line">
+      <div className="flex gap-1 rounded-lg border border-line bg-panel/85 p-1 shadow-card">
         {TABS.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => loadTab(key)}
             className={`flex-1 px-3 py-2 rounded-md text-sm transition-colors ${
               tab === key
-                ? "bg-panel text-accent font-medium shadow-sm"
+                ? "bg-accent text-white font-medium shadow-sm"
                 : "text-muted hover:text-ink"
             }`}
           >
@@ -86,7 +89,7 @@ export function FederationPage({ ctx }: FederationPageProps) {
       </div>
 
       {loading && (
-        <div className="text-center text-muted text-sm py-8">加载中...</div>
+        <div className="text-center text-muted text-sm py-8">{t("common.loading")}</div>
       )}
 
       {/* Imports */}
@@ -94,13 +97,13 @@ export function FederationPage({ ctx }: FederationPageProps) {
         <div className="space-y-3">
           {imports.length === 0 && (
             <div className="text-center text-muted text-sm py-8">
-              暂无联邦导入条目
+              {t("federation.empty.imports")}
             </div>
           )}
           {imports.map((entry) => (
             <div
               key={entry.id}
-              className="bg-panel rounded-xl border border-line shadow-card p-4"
+              className="rounded-lg border border-line bg-panel/85 shadow-card p-4"
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
@@ -112,7 +115,7 @@ export function FederationPage({ ctx }: FederationPageProps) {
                   </span>
                 </div>
                 <span className="text-xs text-muted font-mono">
-                  {new Date(entry.exportedAt).toLocaleString("zh-CN")}
+                  {new Date(entry.exportedAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}
                 </span>
               </div>
               <p className="text-sm text-ink">{entry.content}</p>
@@ -127,9 +130,9 @@ export function FederationPage({ ctx }: FederationPageProps) {
       {/* Dependencies */}
       {tab === "dependencies" && !loading && deps && (
         <div className="space-y-4">
-          <div className="bg-panel rounded-xl border border-line shadow-card p-4">
+          <div className="rounded-lg border border-line bg-panel/85 shadow-card p-4">
             <h3 className="text-sm font-bold text-ink mb-3">
-              项目节点 ({deps.projects.length})
+              {t("federation.projects")} ({deps.projects.length})
             </h3>
             <div className="flex flex-wrap gap-2">
               {deps.projects.map((p) => (
@@ -144,26 +147,26 @@ export function FederationPage({ ctx }: FederationPageProps) {
           </div>
 
           {deps.dependencies.length > 0 && (
-            <div className="bg-panel rounded-xl border border-line shadow-card overflow-hidden">
+            <div className="rounded-lg border border-line bg-panel/85 shadow-card overflow-hidden">
               <div className="px-4 py-3 border-b border-line">
                 <h3 className="text-sm font-bold text-ink">
-                  依赖关系 ({deps.dependencies.length})
+                  {t("federation.relations")} ({deps.dependencies.length})
                 </h3>
               </div>
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-line bg-bg/50 text-left">
+                  <tr className="border-b border-line bg-deep/80 text-left">
                     <th className="px-4 py-2 text-xs font-bold text-muted">
-                      源项目
+                      {t("federation.sourceProject")}
                     </th>
                     <th className="px-4 py-2 text-xs font-bold text-muted">
-                      目标项目
+                      {t("federation.targetProject")}
                     </th>
                     <th className="px-4 py-2 text-xs font-bold text-muted">
-                      强度
+                      {t("federation.strength")}
                     </th>
                     <th className="px-4 py-2 text-xs font-bold text-muted">
-                      共享实体
+                      {t("federation.sharedEntities")}
                     </th>
                   </tr>
                 </thead>
@@ -171,7 +174,7 @@ export function FederationPage({ ctx }: FederationPageProps) {
                   {deps.dependencies.map((d, i) => (
                     <tr
                       key={i}
-                      className="border-b border-line/50 hover:bg-bg/30"
+                      className="border-b border-line/50 hover:bg-white/5"
                     >
                       <td className="px-4 py-2 font-mono text-xs">
                         {d.from}
@@ -196,7 +199,7 @@ export function FederationPage({ ctx }: FederationPageProps) {
 
           {deps.dependencies.length === 0 && (
             <div className="text-center text-muted text-sm py-8">
-              暂无项目间依赖关系
+              {t("federation.empty.dependencies")}
             </div>
           )}
         </div>
@@ -207,23 +210,23 @@ export function FederationPage({ ctx }: FederationPageProps) {
         <div className="space-y-3">
           {approvals.length === 0 && (
             <div className="text-center text-muted text-sm py-8">
-              暂无待审批条目
+              {t("federation.empty.approvals")}
             </div>
           )}
           {approvals.map((entry) => (
             <div
               key={entry.id}
-              className="bg-panel rounded-xl border border-line shadow-card p-4"
+              className="rounded-lg border border-line bg-panel/85 shadow-card p-4"
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">
-                    待审核
+                  <span className="px-2 py-0.5 rounded text-xs border border-amber-400/30 bg-amber-400/10 text-amber-200">
+                    {t("federation.pendingReview")}
                   </span>
                   <span className="text-xs text-muted">{entry.type}</span>
                 </div>
                 <span className="text-xs text-muted font-mono">
-                  {new Date(entry.submittedAt).toLocaleString("zh-CN")}
+                  {new Date(entry.submittedAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}
                 </span>
               </div>
               <p className="text-sm text-ink mb-3">{entry.content}</p>
@@ -236,13 +239,13 @@ export function FederationPage({ ctx }: FederationPageProps) {
                     onClick={() => handleReview(entry.id, "approved")}
                     className="px-3 py-1 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90"
                   >
-                    批准
+                    {t("federation.approve")}
                   </button>
                   <button
                     onClick={() => handleReview(entry.id, "rejected")}
-                    className="px-3 py-1 bg-red-500 text-white rounded text-xs font-medium hover:bg-red-600"
+                    className="px-3 py-1 bg-red-500/80 text-white rounded text-xs font-medium hover:bg-red-500"
                   >
-                    拒绝
+                    {t("federation.reject")}
                   </button>
                 </div>
               </div>

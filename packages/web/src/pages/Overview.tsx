@@ -3,6 +3,8 @@ import type { AppContext } from "../App";
 import type { RecallResponse, MemoryResponse, GraphResponse } from "../types";
 import { api } from "../api/client";
 import { MetricsRow } from "../components/MetricsRow";
+import { PageHeader } from "../components/PageHeader";
+import { useI18n } from "../i18n";
 
 interface OverviewProps {
   ctx: AppContext;
@@ -15,6 +17,7 @@ interface Snapshot {
 }
 
 export function Overview({ ctx }: OverviewProps) {
+  const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<Snapshot>({
     recall: null,
     memories: null,
@@ -59,62 +62,85 @@ export function Overview({ ctx }: OverviewProps) {
 
   const metrics = [
     {
-      label: "记忆数",
+      label: t("overview.metric.memories"),
       value: snapshot.memories?.totalEntries ?? "--",
     },
     {
-      label: "读取范围",
+      label: t("overview.metric.scopes"),
       value: snapshot.memories?.scopesRead?.length ?? "--",
     },
     {
-      label: "图谱节点",
+      label: t("overview.metric.nodes"),
       value: snapshot.graph?.nodeCount ?? "--",
     },
     {
-      label: "图谱边",
+      label: t("overview.metric.edges"),
       value: snapshot.graph?.edgeCount ?? "--",
     },
   ];
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-ink">总览</h1>
+      <PageHeader
+        title={t("overview.title")}
+        description={t("overview.desc")}
+        eyebrow="Memory Fabric"
+        actions={
         <button
           onClick={loadAll}
           disabled={loading || !ctx.agentId}
-          className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent/90 disabled:opacity-50"
         >
-          {loading ? "加载中..." : "加载完整快照"}
+          {loading ? t("overview.loading") : t("overview.load")}
         </button>
-      </div>
+        }
+      />
 
       {error && (
-        <div className="bg-red-50 text-red-600 text-sm rounded-lg p-3 border border-red-200">
+        <div className="rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-200">
           {error}
         </div>
       )}
 
       <MetricsRow metrics={metrics} />
 
+      <div className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
+        <div className="text-sm font-semibold text-ink">{t("overview.pipeline.title")}</div>
+        <div className="mt-1 text-sm text-muted">{t("overview.pipeline.desc")}</div>
+        <div className="mt-4 grid grid-cols-5 gap-2 text-xs">
+          {[
+            "map.step.events",
+            "map.step.candidates",
+            "map.step.cards",
+            "map.step.carriers",
+            "map.step.bench",
+          ].map((key, index) => (
+            <div key={key} className="rounded-lg border border-line bg-deep px-3 py-3">
+              <div className="text-[11px] text-accent-2">0{index + 1}</div>
+              <div className="mt-1 font-medium text-ink">{t(key)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Memory Brief */}
-      <div className="bg-panel rounded-xl border border-line shadow-card">
-        <div className="px-4 py-3 border-b border-line">
-          <h2 className="text-sm font-bold text-ink">记忆摘要</h2>
+      <div className="rounded-lg border border-line bg-panel/85 shadow-card">
+        <div className="border-b border-line px-4 py-3">
+          <h2 className="text-sm font-semibold text-ink">{t("overview.brief")}</h2>
         </div>
         <div className="p-4">
           <pre className="text-sm text-ink whitespace-pre-wrap">
             {snapshot.recall?.memoryBrief ??
-              "尚未加载。点击「加载完整快照」查看。"}
+              t("overview.empty")}
           </pre>
         </div>
       </div>
 
       {/* Graph Report */}
       {snapshot.graph?.report && (
-        <div className="bg-panel rounded-xl border border-line shadow-card">
-          <div className="px-4 py-3 border-b border-line">
-            <h2 className="text-sm font-bold text-ink">图谱报告</h2>
+        <div className="rounded-lg border border-line bg-panel/85 shadow-card">
+          <div className="border-b border-line px-4 py-3">
+            <h2 className="text-sm font-semibold text-ink">{t("overview.graph")}</h2>
           </div>
           <div className="p-4">
             <pre className="text-sm text-ink whitespace-pre-wrap">

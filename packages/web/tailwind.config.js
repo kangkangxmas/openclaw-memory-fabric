@@ -4,26 +4,23 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "#f3efe4",
-        panel: "rgba(255, 252, 245, 0.88)",
-        ink: "#1f1d18",
-        muted: "#70695d",
-        line: "rgba(38, 31, 19, 0.15)",
-        accent: "#0f766e",
-        "accent-2": "#b45309",
+        bg: "#080812",
+        panel: "rgba(18, 17, 32, 0.88)",
+        ink: "#f7f3ff",
+        muted: "#a8a0bd",
+        line: "rgba(190, 174, 255, 0.14)",
+        accent: "#8b5cf6",
+        "accent-2": "#d946ef",
+        "panel-2": "#171429",
+        "deep": "#05050c",
       },
       fontFamily: {
-        serif: [
-          "Iowan Old Style",
-          "Palatino Linotype",
-          "Palatino",
-          "Georgia",
-          "serif",
-        ],
+        serif: ["Inter", "SF Pro Display", "Segoe UI", "Arial", "sans-serif"],
+        sans: ["Inter", "SF Pro Display", "Segoe UI", "Arial", "sans-serif"],
         mono: ["SF Mono", "Fira Code", "monospace"],
       },
       boxShadow: {
-        card: "0 20px 50px rgba(31, 29, 24, 0.12)",
+        card: "0 18px 55px rgba(0, 0, 0, 0.28)",
       },
     },
   },

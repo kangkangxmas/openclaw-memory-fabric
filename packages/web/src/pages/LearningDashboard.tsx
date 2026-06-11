@@ -8,9 +8,12 @@ import type {
   LearningCurvePoint,
 } from "../types";
 import { api } from "../api/client";
+import { PageHeader } from "../components/PageHeader";
+import { useI18n } from "../i18n";
 
 /** Simple SVG line chart for learning curve (no chart library dependency) */
 function LearningCurveChart({ data }: { data: LearningCurvePoint[] }) {
+  const { t } = useI18n();
   if (data.length === 0) return null;
 
   const W = 700;
@@ -49,7 +52,7 @@ function LearningCurveChart({ data }: { data: LearningCurvePoint[] }) {
           x2={W - PAD}
           y1={PAD + chartH * (1 - pct)}
           y2={PAD + chartH * (1 - pct)}
-          stroke="rgba(38,31,19,0.08)"
+          stroke="rgba(190,174,255,0.14)"
           strokeDasharray="4"
         />
       ))}
@@ -65,7 +68,7 @@ function LearningCurveChart({ data }: { data: LearningCurvePoint[] }) {
             y={PAD + chartH - barH}
             width={8}
             height={barH}
-            fill="rgba(15,118,110,0.15)"
+            fill="rgba(139,92,246,0.18)"
             rx={2}
           />
         );
@@ -75,7 +78,7 @@ function LearningCurveChart({ data }: { data: LearningCurvePoint[] }) {
       <polyline
         points={scorePoints}
         fill="none"
-        stroke="#b45309"
+        stroke="#d946ef"
         strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -85,7 +88,7 @@ function LearningCurveChart({ data }: { data: LearningCurvePoint[] }) {
       <polyline
         points={expPoints}
         fill="none"
-        stroke="#0f766e"
+        stroke="#8b5cf6"
         strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -104,7 +107,7 @@ function LearningCurveChart({ data }: { data: LearningCurvePoint[] }) {
               y={H - 5}
               textAnchor="middle"
               fontSize={9}
-              fill="#70695d"
+              fill="#a8a0bd"
             >
               {d.date.slice(5)}
             </text>
@@ -112,13 +115,13 @@ function LearningCurveChart({ data }: { data: LearningCurvePoint[] }) {
         })}
 
       {/* Legend */}
-      <circle cx={PAD} cy={12} r={4} fill="#0f766e" />
-      <text x={PAD + 8} y={16} fontSize={10} fill="#1f1d18">
-        经验数
+      <circle cx={PAD} cy={12} r={4} fill="#8b5cf6" />
+      <text x={PAD + 8} y={16} fontSize={10} fill="#f7f3ff">
+        {t("learning.totalExperiences")}
       </text>
-      <circle cx={PAD + 60} cy={12} r={4} fill="#b45309" />
-      <text x={PAD + 68} y={16} fontSize={10} fill="#1f1d18">
-        平均分
+      <circle cx={PAD + 60} cy={12} r={4} fill="#d946ef" />
+      <text x={PAD + 68} y={16} fontSize={10} fill="#f7f3ff">
+        {t("learning.averageScore")}
       </text>
     </svg>
   );
@@ -131,6 +134,7 @@ interface LearningDashboardProps {
 type Tab = "curve" | "experiences" | "patterns" | "skills" | "report";
 
 export function LearningDashboard({ ctx }: LearningDashboardProps) {
+  const { language, t } = useI18n();
   const [tab, setTab] = useState<Tab>("curve");
   const [curve, setCurve] = useState<LearningCurvePoint[]>([]);
   const [experiences, setExperiences] = useState<ExperienceEntry[]>([]);
@@ -179,26 +183,26 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
   };
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: "curve", label: "学习曲线" },
-    { key: "experiences", label: "经验记录" },
-    { key: "patterns", label: "识别模式" },
-    { key: "skills", label: "技能草稿" },
-    { key: "report", label: "评分报告" },
+    { key: "curve", label: t("learning.tab.curve") },
+    { key: "experiences", label: t("learning.tab.experiences") },
+    { key: "patterns", label: t("learning.tab.patterns") },
+    { key: "skills", label: t("learning.tab.skills") },
+    { key: "report", label: t("learning.tab.report") },
   ];
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-ink">自学习仪表板</h1>
+      <PageHeader title={t("learning.title")} description={t("learning.desc")} eyebrow="Learning Loop" />
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-bg rounded-lg p-1 border border-line">
+      <div className="flex gap-1 rounded-lg border border-line bg-panel/85 p-1 shadow-card">
         {TABS.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => loadTab(key)}
             className={`flex-1 px-3 py-2 rounded-md text-sm transition-colors ${
               tab === key
-                ? "bg-panel text-accent font-medium shadow-sm"
+                ? "bg-accent text-white font-medium shadow-sm"
                 : "text-muted hover:text-ink"
             }`}
           >
@@ -209,7 +213,7 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
 
       {loading && (
         <div className="text-center text-muted text-sm py-8">
-          加载中...
+          {t("common.loading")}
         </div>
       )}
 
@@ -218,13 +222,13 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
         <div className="space-y-3">
           {curve.length === 0 && (
             <div className="text-center text-muted text-sm py-8">
-              暂无学习数据
+              {t("learning.empty.curve")}
             </div>
           )}
           {curve.length > 0 && (
-            <div className="bg-panel rounded-xl border border-line shadow-card p-4">
+            <div className="rounded-lg border border-line bg-panel/85 shadow-card p-4">
               <h3 className="text-sm font-bold text-ink mb-4">
-                近 30 天学习趋势
+                {t("learning.trend30")}
               </h3>
               <LearningCurveChart data={curve} />
               {/* Summary stats */}
@@ -233,7 +237,7 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
                   <div className="text-lg font-bold text-ink">
                     {curve.reduce((s, p) => s + p.experiences, 0)}
                   </div>
-                  <div className="text-xs text-muted">总经验数</div>
+                  <div className="text-xs text-muted">{t("learning.totalExperiences")}</div>
                 </div>
                 <div>
                   <div className="text-lg font-bold text-accent">
@@ -248,13 +252,13 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
                         : "--";
                     })()}
                   </div>
-                  <div className="text-xs text-muted">平均分</div>
+                  <div className="text-xs text-muted">{t("learning.averageScore")}</div>
                 </div>
                 <div>
                   <div className="text-lg font-bold text-accent-2">
                     {curve.reduce((s, p) => s + p.patterns, 0)}
                   </div>
-                  <div className="text-xs text-muted">识别模式数</div>
+                  <div className="text-xs text-muted">{t("learning.patternCount")}</div>
                 </div>
               </div>
             </div>
@@ -267,13 +271,13 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
         <div className="space-y-3">
           {experiences.length === 0 && (
             <div className="text-center text-muted text-sm py-8">
-              暂无经验记录
+              {t("learning.empty.experiences")}
             </div>
           )}
           {experiences.map((exp) => (
             <div
               key={exp.id}
-              className="bg-panel rounded-xl border border-line shadow-card p-4"
+              className="rounded-lg border border-line bg-panel/85 shadow-card p-4"
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
@@ -281,22 +285,22 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
                     className={`px-2 py-0.5 rounded text-xs font-medium ${
                       exp.success
                         ? "bg-accent/10 text-accent"
-                        : "bg-red-100 text-red-600"
+                        : "border border-red-400/30 bg-red-400/10 text-red-200"
                     }`}
                   >
-                    {exp.success ? "成功" : "失败"}
+                    {exp.success ? t("learning.success") : t("learning.failure")}
                   </span>
                   <span className="text-xs text-muted">
                     {exp.taskType}
                   </span>
                   {exp.selfScore != null && (
                     <span className="text-xs font-mono text-accent-2">
-                      {exp.selfScore}分
+                      {exp.selfScore}{t("learning.scoreSuffix")}
                     </span>
                   )}
                 </div>
                 <span className="text-xs text-muted font-mono">
-                  {new Date(exp.timestamp).toLocaleString("zh-CN")}
+                  {new Date(exp.timestamp).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}
                 </span>
               </div>
 
@@ -307,7 +311,7 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
                   {exp.toolsUsed.map((t, i) => (
                     <span
                       key={i}
-                      className="px-2 py-0.5 rounded bg-bg text-xs text-muted border border-line"
+                      className="px-2 py-0.5 rounded bg-deep text-xs text-muted border border-line"
                     >
                       {t}
                     </span>
@@ -317,7 +321,7 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
 
               {exp.lessons.length > 0 && (
                 <div className="mt-2 text-xs text-muted">
-                  <strong>教训:</strong>{" "}
+                  <strong>{t("learning.lessons")}:</strong>{" "}
                   {exp.lessons.join("; ")}
                 </div>
               )}
@@ -331,13 +335,13 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {patterns.length === 0 && (
             <div className="col-span-2 text-center text-muted text-sm py-8">
-              暂无识别模式
+              {t("learning.empty.patterns")}
             </div>
           )}
           {patterns.map((p) => (
             <div
               key={p.id}
-              className="bg-panel rounded-xl border border-line shadow-card p-4"
+              className="rounded-lg border border-line bg-panel/85 shadow-card p-4"
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-mono text-muted">
@@ -363,18 +367,18 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
         <div className="space-y-3">
           {drafts.length === 0 && (
             <div className="text-center text-muted text-sm py-8">
-              暂无技能草稿
+              {t("learning.empty.skills")}
             </div>
           )}
           {drafts.map((d) => (
             <div
               key={d.id}
-              className="bg-panel rounded-xl border border-line shadow-card p-4"
+              className="rounded-lg border border-line bg-panel/85 shadow-card p-4"
             >
               <h3 className="text-sm font-bold text-ink">{d.name}</h3>
               <p className="text-xs text-muted mt-1">{d.description}</p>
               <div className="mt-2 text-xs text-muted">
-                触发: {d.trigger}
+                {t("learning.trigger")}: {d.trigger}
               </div>
               <pre className="mt-2 text-xs font-mono bg-ink text-green-400 rounded-lg p-3 overflow-auto max-h-40">
                 {d.body}
@@ -389,13 +393,13 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
         <div className="space-y-3">
           {reports.length === 0 && (
             <div className="text-center text-muted text-sm py-8">
-              暂无评分报告
+              {t("learning.empty.report")}
             </div>
           )}
           {reports.map((r, i) => (
             <div
               key={i}
-              className="bg-panel rounded-xl border border-line shadow-card p-4"
+              className="rounded-lg border border-line bg-panel/85 shadow-card p-4"
             >
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-bold text-ink">
@@ -406,7 +410,7 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
                 </span>
               </div>
               <div className="text-xs text-muted mb-2">
-                共 {r.totalEntries} 条经验
+                {t("learning.reportTotalPrefix")} {r.totalEntries} {t("learning.reportTotalSuffix")}
               </div>
 
               {/* Dimension bars */}
@@ -418,7 +422,7 @@ export function LearningDashboard({ ctx }: LearningDashboardProps) {
                       {score}
                     </span>
                   </div>
-                  <div className="h-1.5 bg-bg rounded-full overflow-hidden">
+                  <div className="h-1.5 bg-deep rounded-full overflow-hidden">
                     <div
                       className="h-full bg-accent rounded-full transition-all"
                       style={{ width: `${score}%` }}

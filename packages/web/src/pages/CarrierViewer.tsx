@@ -3,6 +3,8 @@ import type { AppContext } from "../App";
 import type { CarrierFile } from "../types";
 import { api } from "../api/client";
 import Markdown from "react-markdown";
+import { PageHeader } from "../components/PageHeader";
+import { useI18n } from "../i18n";
 
 interface CarrierViewerProps {
   ctx: AppContext;
@@ -21,6 +23,7 @@ const DEFAULT_FILES = [
 ];
 
 export function CarrierViewer({ ctx }: CarrierViewerProps) {
+  const { t } = useI18n();
   const [carriers, setCarriers] = useState<CarrierFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<CarrierFile | null>(null);
@@ -47,16 +50,20 @@ export function CarrierViewer({ ctx }: CarrierViewerProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-ink">载体文件</h1>
+      <PageHeader
+        title={t("carriers.title")}
+        description={t("carriers.desc")}
+        eyebrow="Carrier Projection"
+        actions={
         <button
           onClick={load}
           disabled={loading || !ctx.agentId}
-          className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-50"
         >
-          {loading ? "加载中..." : "加载载体文件"}
+          {loading ? t("common.loading") : t("carriers.load")}
         </button>
-      </div>
+        }
+      />
 
       {carriers.length > 0 && (
         <div className="flex gap-4">
@@ -80,9 +87,9 @@ export function CarrierViewer({ ctx }: CarrierViewerProps) {
           </div>
 
           {/* Content */}
-          <div className="flex-1 bg-panel rounded-xl border border-line shadow-card overflow-hidden">
-            <div className="px-4 py-3 border-b border-line flex items-center justify-between">
-              <h2 className="text-sm font-bold text-ink">
+          <div className="flex-1 overflow-hidden rounded-lg border border-line bg-panel/85 shadow-card">
+            <div className="flex items-center justify-between border-b border-line px-4 py-3">
+              <h2 className="text-sm font-semibold text-ink">
                 {selected?.filename ?? "--"}
               </h2>
               {selected && (
@@ -90,10 +97,10 @@ export function CarrierViewer({ ctx }: CarrierViewerProps) {
                   className={`text-xs px-2 py-0.5 rounded-full ${
                     selected.exists
                       ? "bg-accent/10 text-accent"
-                      : "bg-red-100 text-red-600"
+                      : "border border-red-400/30 bg-red-400/10 text-red-200"
                   }`}
                 >
-                  {selected.exists ? "存在" : "未创建"}
+                  {selected.exists ? t("common.exists") : t("common.missing")}
                 </span>
               )}
             </div>
@@ -103,8 +110,8 @@ export function CarrierViewer({ ctx }: CarrierViewerProps) {
               ) : (
                 <p className="text-muted text-sm">
                   {selected?.exists === false
-                    ? "文件尚未创建"
-                    : "无内容"}
+                    ? t("common.missing")
+                    : t("common.empty")}
                 </p>
               )}
             </div>
@@ -114,7 +121,7 @@ export function CarrierViewer({ ctx }: CarrierViewerProps) {
 
       {!loading && carriers.length === 0 && (
         <div className="text-center text-muted text-sm py-12">
-          点击「加载载体文件」查看 agent 的 9 个稳定载体
+          {t("common.empty")}
         </div>
       )}
     </div>

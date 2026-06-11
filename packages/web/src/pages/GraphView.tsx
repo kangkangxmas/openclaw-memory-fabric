@@ -2,6 +2,8 @@ import { useState, useCallback } from "react";
 import type { AppContext } from "../App";
 import type { GraphNode, GraphEdge } from "../types";
 import { api } from "../api/client";
+import { PageHeader } from "../components/PageHeader";
+import { useI18n } from "../i18n";
 
 // Dynamically import to avoid SSR issues
 import ForceGraph2D from "react-force-graph-2d";
@@ -11,14 +13,14 @@ interface GraphViewProps {
 }
 
 const NODE_COLORS: Record<string, string> = {
-  symbol: "#0f766e",
-  entity: "#b45309",
-  person: "#7c3aed",
-  place: "#0369a1",
-  topic: "#be123c",
-  module: "#0f766e",
-  concept: "#b45309",
-  file: "#64748b",
+  symbol: "#8b5cf6",
+  entity: "#d946ef",
+  person: "#22d3ee",
+  place: "#38bdf8",
+  topic: "#fb7185",
+  module: "#a78bfa",
+  concept: "#f59e0b",
+  file: "#94a3b8",
 };
 
 interface FGNode {
@@ -42,6 +44,7 @@ interface FGGraphData {
 }
 
 export function GraphView({ ctx }: GraphViewProps) {
+  const { t } = useI18n();
   const [graphData, setGraphData] = useState<FGGraphData | null>(null);
   const [report, setReport] = useState("");
   const [loading, setLoading] = useState(false);
@@ -114,16 +117,20 @@ export function GraphView({ ctx }: GraphViewProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-ink">知识图谱</h1>
+      <PageHeader
+        title={t("graph.title")}
+        description={t("graph.desc")}
+        eyebrow="Graphify"
+        actions={
         <button
           onClick={loadGraph}
           disabled={loading}
-          className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-50"
         >
-          {loading ? "加载中..." : "加载图谱"}
+          {loading ? t("common.loading") : t("graph.load")}
         </button>
-      </div>
+        }
+      />
 
       {/* Graph canvas */}
       {graphData && (
@@ -131,11 +138,11 @@ export function GraphView({ ctx }: GraphViewProps) {
           {/* Search */}
           <input
             type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="搜索节点..."
-            className="w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
-          />
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder={t("common.search")}
+          className="w-full rounded-lg border border-line bg-deep px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+        />
 
           {/* Legend */}
           <div className="flex flex-wrap gap-3 text-xs">
@@ -150,7 +157,7 @@ export function GraphView({ ctx }: GraphViewProps) {
             ))}
           </div>
 
-          <div className="bg-panel rounded-xl border border-line shadow-card overflow-hidden">
+          <div className="overflow-hidden rounded-lg border border-line bg-panel/85 shadow-card">
             <ForceGraph2D
               graphData={graphData}
               width={800}
@@ -166,18 +173,18 @@ export function GraphView({ ctx }: GraphViewProps) {
               linkWidth={(link: FGLink) =>
                 Math.max(1, link.weight * 2)
               }
-              linkColor={() => "rgba(38,31,19,0.15)"}
+              linkColor={() => "rgba(190,174,255,0.18)"}
               onNodeClick={handleNodeClick}
-              backgroundColor="#f3efe4"
+              backgroundColor="#080812"
               cooldownTicks={100}
             />
           </div>
 
           {/* Selected node info */}
           {selected && (
-            <div className="bg-panel rounded-xl border border-line shadow-card p-4">
-              <h3 className="text-sm font-bold text-ink mb-2">
-                节点详情
+            <div className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
+              <h3 className="mb-2 text-sm font-semibold text-ink">
+                {t("graph.nodeDetails")}
               </h3>
               <dl className="grid grid-cols-3 gap-2 text-sm">
                 <div>
@@ -185,7 +192,7 @@ export function GraphView({ ctx }: GraphViewProps) {
                   <dd className="font-mono">{selected.id}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">类型</dt>
+                  <dt className="text-xs text-muted">{t("graph.type")}</dt>
                   <dd>
                     <span
                       className="inline-block px-2 py-0.5 rounded text-xs text-white"
@@ -196,7 +203,7 @@ export function GraphView({ ctx }: GraphViewProps) {
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">引用次数</dt>
+                  <dt className="text-xs text-muted">{t("graph.mentions")}</dt>
                   <dd>{selected.mentions}</dd>
                 </div>
               </dl>
@@ -207,9 +214,9 @@ export function GraphView({ ctx }: GraphViewProps) {
 
       {/* Graph report */}
       {report && (
-        <div className="bg-panel rounded-xl border border-line shadow-card">
-          <div className="px-4 py-3 border-b border-line">
-            <h2 className="text-sm font-bold text-ink">图谱报告</h2>
+        <div className="rounded-lg border border-line bg-panel/85 shadow-card">
+          <div className="border-b border-line px-4 py-3">
+            <h2 className="text-sm font-semibold text-ink">{t("overview.graph")}</h2>
           </div>
           <div className="p-4">
             <pre className="text-sm text-ink whitespace-pre-wrap">
@@ -220,26 +227,26 @@ export function GraphView({ ctx }: GraphViewProps) {
       )}
 
       {/* Graph query */}
-      <div className="bg-panel rounded-xl border border-line shadow-card p-4 space-y-3">
-        <h3 className="text-sm font-bold text-ink">图谱查询</h3>
+      <div className="space-y-3 rounded-lg border border-line bg-panel/85 p-4 shadow-card">
+        <h3 className="text-sm font-semibold text-ink">{t("graph.query")}</h3>
         <div className="flex gap-2">
           <input
             type="text"
             value={queryText}
             onChange={(e) => setQueryText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && runQuery()}
-            placeholder="输入查询关键词..."
-            className="flex-1 rounded-lg border border-line bg-bg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
+            onKeyDown={(e) => e.key === "Enter" && void runQuery()}
+            placeholder={t("graph.queryPlaceholder")}
+            className="flex-1 rounded-lg border border-line bg-deep px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-accent"
           />
           <button
             onClick={runQuery}
             className="px-4 py-2 bg-accent-2 text-white rounded-lg text-sm font-medium hover:bg-accent-2/90"
           >
-            查询
+            {t("graph.runQuery")}
           </button>
         </div>
         {queryResult && (
-          <pre className="text-xs font-mono bg-ink text-green-400 rounded-lg p-3 overflow-auto max-h-64">
+          <pre className="text-xs font-mono bg-deep text-emerald-300 rounded-lg p-3 overflow-auto max-h-64">
             {queryResult}
           </pre>
         )}

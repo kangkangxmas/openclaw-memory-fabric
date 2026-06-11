@@ -11,6 +11,7 @@ import { CarrierViewer } from "./pages/CarrierViewer";
 import { LearningDashboard } from "./pages/LearningDashboard";
 import { FederationPage } from "./pages/FederationPage";
 import { V2Inspector } from "./pages/V2Inspector";
+import { I18nProvider } from "./i18n";
 
 export interface AppContext {
   agentId: string;
@@ -21,7 +22,7 @@ export interface AppContext {
   projects: string[];
 }
 
-export default function App() {
+function AppContent() {
   const [page, setPage] = useState<Page>("overview");
   const [ctx, setCtx] = useState<AppContext>({
     agentId: "",
@@ -79,7 +80,7 @@ export default function App() {
   }, [loadProjects]);
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen bg-bg text-ink">
       <StatusBar />
       <Layout
         sidebar={
@@ -100,5 +101,13 @@ export default function App() {
         {page === "v2" && <V2Inspector ctx={ctx} />}
       </Layout>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <I18nProvider>
+      <AppContent />
+    </I18nProvider>
   );
 }

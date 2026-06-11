@@ -18,6 +18,8 @@ import type {
   V2TraceResponse,
 } from "../types";
 import { api } from "../api/client";
+import { PageHeader } from "../components/PageHeader";
+import { useI18n } from "../i18n";
 
 interface V2InspectorProps {
   ctx: AppContext;
@@ -67,17 +69,17 @@ function jsonPreview(value: unknown, limit = 240): string {
 }
 
 function statusBadgeClass(status: "pass" | "warn" | "fail" | "ready" | string): string {
-  if (status === "pass" || status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "warn") return "border-amber-200 bg-amber-50 text-amber-700";
-  if (status === "fail" || status === "rejected") return "border-red-200 bg-red-50 text-red-700";
-  if (status === "promoted") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "needs_review") return "border-amber-200 bg-amber-50 text-amber-700";
-  return "border-line bg-bg text-muted";
+  if (status === "pass" || status === "ready") return "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
+  if (status === "warn") return "border-amber-400/30 bg-amber-400/10 text-amber-200";
+  if (status === "fail" || status === "rejected") return "border-red-400/30 bg-red-400/10 text-red-200";
+  if (status === "promoted") return "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
+  if (status === "needs_review") return "border-amber-400/30 bg-amber-400/10 text-amber-200";
+  return "border-line bg-deep text-muted";
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border border-line bg-panel px-3 py-2">
+    <div className="rounded-lg border border-line bg-deep px-3 py-2">
       <div className="text-xs text-muted">{label}</div>
       <div className="mt-1 text-lg font-bold text-ink">{value}</div>
     </div>
@@ -93,7 +95,8 @@ function CompactBadge({ children, status }: { children: React.ReactNode; status?
 }
 
 export function V2Inspector({ ctx }: V2InspectorProps) {
-  const [query, setQuery] = useState("继续上次 Memory Fabric v2 改造任务");
+  const { t } = useI18n();
+  const [query, setQuery] = useState("");
   const [recall, setRecall] = useState<V2RecallPlanResponse | null>(null);
   const [trace, setTrace] = useState<V2TraceResponse | null>(null);
   const [traceId, setTraceId] = useState("");
@@ -270,49 +273,48 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-ink">V2 Inspector</h1>
-          <p className="mt-1 text-sm text-muted">
-            Canary、Candidate Review、Source Trace、Injection Inspector、Quality Metrics
-          </p>
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
+      <PageHeader
+        title={t("v2.title")}
+        description={t("v2.desc")}
+        eyebrow="Memory Fabric v2"
+        actions={
+        <>
           <button
             onClick={() => void run("ops", loadOps)}
             disabled={!!loading}
             className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50"
           >
-            {loading === "ops" ? "刷新中..." : "刷新巡检"}
+            {loading === "ops" ? t("common.loading") : t("v2.refresh")}
           </button>
           <button
             onClick={() => void run("bench-latest", loadLatestBench)}
             disabled={!!loading}
             className="px-4 py-2 border border-line rounded-lg text-sm text-ink hover:bg-line/40 disabled:opacity-50"
           >
-            最新 Bench
+            {t("v2.latestBench")}
           </button>
-        </div>
-      </div>
+        </>
+        }
+      />
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm text-red-200">
           {error}
         </div>
       )}
 
-      <section className="rounded-xl border border-line bg-panel p-4 shadow-card">
+      <section className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-sm font-bold text-ink">Canary Summary</h2>
+              <h2 className="text-sm font-bold text-ink">{t("v2.canary")}</h2>
               {canary && <CompactBadge status={canary.status}>{canary.status}</CompactBadge>}
               {canary && <CompactBadge status={canary.mode}>{canary.mode}</CompactBadge>}
             </div>
             <div className="mt-1 text-xs text-muted">
               {canary
                 ? `${canary.agentId}${canary.projectId ? ` / ${canary.projectId}` : ""} · source coverage ${pct(canary.candidateSourceCoverage)} · recall audits ${canary.recallAudit.count}`
-                : "点击刷新巡检读取当前 Agent 的只读 canary 状态"}
+                : t("v2.canary.empty")}
             </div>
           </div>
           <div className="grid min-w-full grid-cols-2 gap-2 sm:grid-cols-4 xl:min-w-[560px]">
@@ -339,17 +341,17 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
           </div>
         )}
         {failingChecks.length > 0 && (
-          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            需要关注：{failingChecks.map((check) => `${check.id}=${check.status}`).join(", ")}
+          <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+            {t("v2.attention")}: {failingChecks.map((check) => `${check.id}=${check.status}`).join(", ")}
           </div>
         )}
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
-        <div className="rounded-xl border border-line bg-panel p-4 shadow-card">
+        <div className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-bold text-ink">Consolidation Worker</div>
+              <div className="text-sm font-bold text-ink">{t("v2.worker")}</div>
               <div className="text-xs text-muted">
                 {worker?.running ? "running" : "stopped"} · {worker?.runCount ?? 0} runs · {worker?.errorCount ?? 0} errors
               </div>
@@ -380,7 +382,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             <Metric label="Last Run" value={formatTime(worker?.lastRunAt)} />
           </div>
           {gray && (
-            <div className="mt-3 rounded-lg border border-line bg-bg px-3 py-2 text-xs text-ink">
+            <div className="mt-3 rounded-lg border border-line bg-deep px-3 py-2 text-xs text-ink">
               <div className="flex items-center justify-between gap-2">
                 <span>Gray mode: {gray.mode}</span>
                 <span>Audit: {gray.recallAudit.count}</span>
@@ -394,17 +396,17 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             </div>
           )}
           {worker?.lastError && (
-            <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="mt-3 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-200">
               {worker.lastError}
             </div>
           )}
         </div>
 
-        <div className="rounded-xl border border-line bg-panel shadow-card overflow-hidden">
+        <div className="rounded-lg border border-line bg-panel/85 shadow-card overflow-hidden">
           <div className="border-b border-line px-4 py-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <div className="text-sm font-bold text-ink">Candidate Review</div>
+                <div className="text-sm font-bold text-ink">{t("v2.candidates")}</div>
                 <div className="text-xs text-muted">
                   {sortedCandidates.length} shown · pending queue and manual gates
                 </div>
@@ -428,7 +430,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   disabled={!!loading}
                   className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
                 >
-                  刷新
+                  {t("v2.candidate.refresh")}
                 </button>
               </div>
             </div>
@@ -457,7 +459,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                         ))}
                       </div>
                       {candidate.reviewReason && (
-                        <div className="mt-2 rounded bg-amber-50 px-2 py-1 text-amber-800">{candidate.reviewReason}</div>
+                        <div className="mt-2 rounded border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-amber-200">{candidate.reviewReason}</div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-muted">
@@ -489,7 +491,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                       <button
                         onClick={() => void run("candidate-reject", () => reviewCandidate(candidate, "reject"))}
                         disabled={!!loading || candidate.status === "promoted" || candidate.status === "rejected"}
-                        className="px-2 py-1 border border-line rounded text-xs text-red-700 disabled:opacity-40"
+                        className="px-2 py-1 border border-line rounded text-xs text-red-200 disabled:opacity-40"
                       >
                         Reject
                       </button>
@@ -499,7 +501,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                 {sortedCandidates.length === 0 && (
                   <tr>
                     <td className="px-4 py-8 text-center text-sm text-muted" colSpan={4}>
-                      暂无候选记忆
+                      {t("common.empty")}
                     </td>
                   </tr>
                 )}
@@ -509,10 +511,10 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
         </div>
       </section>
 
-      <section className="rounded-xl border border-line bg-panel shadow-card overflow-hidden">
+      <section className="rounded-lg border border-line bg-panel/85 shadow-card overflow-hidden">
         <div className="border-b border-line px-4 py-3 flex items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-bold text-ink">Recall Audit</div>
+              <div className="text-sm font-bold text-ink">{t("v2.recallAudit")}</div>
             <div className="text-xs text-muted">legacy / v2 comparison for gray rollout</div>
           </div>
           <button
@@ -520,7 +522,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             disabled={!!loading}
             className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
           >
-            刷新
+            {t("common.refresh")}
           </button>
         </div>
         <div className="max-h-72 overflow-auto">
@@ -573,7 +575,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
               {recallAudit.length === 0 && (
                 <tr>
                   <td className="px-4 py-8 text-center text-sm text-muted" colSpan={5}>
-                    暂无 recall audit
+                    {t("common.empty")}
                   </td>
                 </tr>
               )}
@@ -589,30 +591,30 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void run("recall", loadRecall)}
-            placeholder="输入 v2 召回问题..."
-            className="flex-1 rounded-lg border border-line bg-bg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
+            placeholder={t("v2.query.placeholder")}
+            className="flex-1 rounded-lg border border-line bg-deep px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-accent"
           />
           <button
             onClick={() => void run("recall", loadRecall)}
             disabled={loading === "recall" || !query.trim()}
             className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50"
           >
-            {loading === "recall" ? "规划中..." : "召回计划"}
+            {loading === "recall" ? t("common.loading") : t("v2.injection")}
           </button>
           <button
             onClick={() => void run("drift", loadDrift)}
             disabled={loading === "drift" || !ctx.agentId}
             className="px-4 py-2 border border-line rounded-lg text-sm text-ink hover:bg-line/40 disabled:opacity-50"
           >
-            {loading === "drift" ? "审计中..." : "Drift"}
+            {loading === "drift" ? t("v2.drift.loading") : "Drift"}
           </button>
         </div>
 
         {recall && (
           <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
-            <div className="rounded-xl border border-line bg-panel shadow-card overflow-hidden">
+            <div className="rounded-lg border border-line bg-panel/85 shadow-card overflow-hidden">
               <div className="border-b border-line px-4 py-3">
-                <div className="text-sm font-bold text-ink">Injection Inspector</div>
+                <div className="text-sm font-bold text-ink">{t("v2.injection")}</div>
                 <div className="mt-1 text-xs text-muted">
                   {recall.plan.intent} | {recall.executionTimeMs}ms | {recall.plan.reason}
                 </div>
@@ -622,7 +624,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   <button
                     key={card.memoryId}
                     onClick={() => void run("trace", () => loadTrace(card.memoryId))}
-                    className="block w-full px-4 py-3 text-left hover:bg-bg/50"
+                    className="block w-full px-4 py-3 text-left hover:bg-white/5"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-mono text-muted">{card.memoryId}</span>
@@ -635,19 +637,19 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                       Evidence: {card.evidence.join(", ") || "none"}
                     </div>
                     {card.conflict && (
-                      <div className="mt-2 text-xs text-red-700">{card.conflict}</div>
+                      <div className="mt-2 text-xs text-red-200">{card.conflict}</div>
                     )}
                   </button>
                 ))}
                 {recall.cards.length === 0 && (
                   <div className="px-4 py-8 text-center text-sm text-muted">
-                    没有生成 memory cards
+                    {t("v2.cards.empty")}
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="rounded-xl border border-line bg-panel p-4 shadow-card">
+            <div className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-bold text-ink">Conflict Center</div>
@@ -672,20 +674,20 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
               </div>
               <div className="mt-3 space-y-2">
                 {conflictCards.length === 0 && (!drift || drift.issues.length === 0) && (
-                  <div className="text-sm text-muted">暂无冲突或漂移</div>
+                  <div className="text-sm text-muted">{t("v2.conflicts.empty")}</div>
                 )}
                 {conflictCards.map((card) => (
-                  <div key={card.memoryId} className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+                  <div key={card.memoryId} className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-200">
                     {card.memoryId}: {card.conflict}
                   </div>
                 ))}
                 {drift?.issues.slice(0, 6).map((issue) => (
-                  <div key={`${issue.filename}-${issue.memoryId}`} className="rounded-lg bg-bg px-3 py-2 text-xs text-ink">
+                  <div key={`${issue.filename}-${issue.memoryId}`} className="rounded-lg bg-deep px-3 py-2 text-xs text-ink">
                     <span className="font-bold">{issue.severity}</span> · {issue.filename}: {issue.message}
                   </div>
                 ))}
                 {projection && (
-                  <div className="rounded-lg bg-bg px-3 py-2 text-xs text-ink">
+                  <div className="rounded-lg bg-deep px-3 py-2 text-xs text-ink">
                     Projection {projection.projectionId} · {projection.status} · merged {projection.merged.length}
                   </div>
                 )}
@@ -696,10 +698,10 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-xl border border-line bg-panel shadow-card overflow-hidden">
+        <div className="rounded-lg border border-line bg-panel/85 shadow-card overflow-hidden">
           <div className="border-b border-line px-4 py-3 flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-bold text-ink">Source Trace</div>
+              <div className="text-sm font-bold text-ink">{t("v2.trace")}</div>
               <div className="text-xs text-muted">memory id to sourceRefs to L0 events</div>
             </div>
             <button
@@ -707,7 +709,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
               disabled={loading === "trace" || !traceId.trim()}
               className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink hover:bg-line/40 disabled:opacity-50"
             >
-              查询
+              {t("common.search")}
             </button>
           </div>
           <div className="p-4 space-y-4">
@@ -715,11 +717,11 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
               value={traceId}
               onChange={(e) => setTraceId(e.target.value)}
               placeholder="memory id"
-              className="w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-accent"
+              className="w-full rounded-lg border border-line bg-deep px-3 py-2 text-sm font-mono text-ink focus:outline-none focus:ring-1 focus:ring-accent"
             />
             {trace ? (
               <div className="space-y-4">
-                <div className="rounded-lg border border-line bg-bg px-3 py-2">
+                <div className="rounded-lg border border-line bg-deep px-3 py-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="font-mono text-xs text-muted">{trace.memoryId}</div>
                     <CompactBadge status={trace.status}>{trace.status}</CompactBadge>
@@ -728,7 +730,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                     {trace.sourceRefs.map((ref) => (
                       <CompactBadge key={ref}>{ref}</CompactBadge>
                     ))}
-                    {trace.sourceRefs.length === 0 && <span className="text-xs text-red-700">missing sourceRefs</span>}
+                    {trace.sourceRefs.length === 0 && <span className="text-xs text-red-200">missing sourceRefs</span>}
                   </div>
                 </div>
 
@@ -760,7 +762,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                       </div>
                     ))}
                     {traceEvents.length === 0 && (
-                      <div className="px-3 py-6 text-center text-sm text-muted">没有找到 L0 event</div>
+                      <div className="px-3 py-6 text-center text-sm text-muted">{t("v2.events.empty")}</div>
                     )}
                   </div>
                 </div>
@@ -778,7 +780,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                         </div>
                       ))}
                       {traceSources.length === 0 && (
-                        <div className="px-3 py-6 text-center text-sm text-muted">暂无 source metadata</div>
+                        <div className="px-3 py-6 text-center text-sm text-muted">{t("v2.sources.empty")}</div>
                       )}
                     </div>
                   </div>
@@ -797,7 +799,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                         </div>
                       ))}
                       {traceRelations.length === 0 && (
-                        <div className="px-3 py-6 text-center text-sm text-muted">暂无关系 trace</div>
+                        <div className="px-3 py-6 text-center text-sm text-muted">{t("v2.relations.empty")}</div>
                       )}
                     </div>
                   </div>
@@ -805,22 +807,22 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
 
                 <details>
                   <summary className="cursor-pointer text-xs text-muted">Raw trace JSON</summary>
-                  <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-bg p-3 text-xs text-ink">
+                  <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-deep p-3 text-xs text-ink">
                     {JSON.stringify(trace, null, 2)}
                   </pre>
                 </details>
               </div>
             ) : (
               <div className="rounded-lg border border-dashed border-line px-3 py-8 text-center text-sm text-muted">
-                从 recall card、candidate promoted memory 或手动 memory id 查询证据链
+                {t("v2.trace.empty")}
               </div>
             )}
           </div>
         </div>
 
-        <div className="rounded-xl border border-line bg-panel shadow-card overflow-hidden">
+        <div className="rounded-lg border border-line bg-panel/85 shadow-card overflow-hidden">
           <div className="border-b border-line px-4 py-3">
-            <div className="text-sm font-bold text-ink">Quality Metrics</div>
+            <div className="text-sm font-bold text-ink">{t("v2.quality")}</div>
             <div className="text-xs text-muted">
               Memory Bench v0{bench ? ` · ${bench.generatedAt}` : ""}
             </div>
@@ -852,14 +854,14 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
               </div>
             ) : (
               <div className="py-8 text-center text-sm text-muted">
-                还没有 latest bench report
+                {t("v2.bench.empty")}
               </div>
             )}
 
-            <div className="rounded-lg border border-line bg-bg p-3">
-              <div className="text-xs font-bold text-ink">Bench Tools</div>
+            <div className="rounded-lg border border-line bg-deep p-3">
+              <div className="text-xs font-bold text-ink">{t("v2.benchTools")}</div>
               <div className="mt-1 text-xs text-muted">
-                Seed 操作会写入 fixture 记忆，仅在维护 bench 基线时使用。
+                {t("v2.seed.warning")}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -886,14 +888,14 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                 <button
                   onClick={() => void run("bench-seed", () => seedBench())}
                   disabled={!!loading}
-                  className="px-3 py-1.5 border border-amber-300 rounded-lg text-xs text-amber-800 disabled:opacity-50"
+                  className="px-3 py-1.5 border border-amber-400/40 rounded-lg text-xs text-amber-200 disabled:opacity-50"
                 >
                   Seed Bench
                 </button>
                 <button
                   onClick={() => void run("bench-seed-fixtures", () => seedBench(true))}
                   disabled={!!loading}
-                  className="px-3 py-1.5 border border-amber-300 rounded-lg text-xs text-amber-800 disabled:opacity-50"
+                  className="px-3 py-1.5 border border-amber-400/40 rounded-lg text-xs text-amber-200 disabled:opacity-50"
                 >
                   Seed Fixtures
                 </button>

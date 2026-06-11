@@ -13,10 +13,10 @@ export function MetricsRow({ metrics }: MetricsRowProps) {
       {metrics.map((m) => (
         <div
           key={m.label}
-          className="bg-panel rounded-xl border border-line p-4 shadow-card"
+          className="rounded-lg border border-line bg-panel/85 p-4 shadow-card"
         >
-          <div className="text-2xl font-bold text-ink">{m.value}</div>
-          <div className="text-xs text-muted mt-1">{m.label}</div>
+          <div className="text-2xl font-semibold text-ink">{m.value}</div>
+          <div className="mt-1 text-xs text-muted">{m.label}</div>
         </div>
       ))}
     </div>

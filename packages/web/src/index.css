@@ -4,9 +4,13 @@
 
 body {
   margin: 0;
-  background: #f3efe4;
-  color: #1f1d18;
-  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  min-width: 1160px;
+  background:
+    radial-gradient(circle at 18% -10%, rgba(139, 92, 246, 0.24), transparent 34%),
+    radial-gradient(circle at 84% 0%, rgba(217, 70, 239, 0.16), transparent 30%),
+    #080812;
+  color: #f7f3ff;
+  font-family: Inter, "SF Pro Display", "Segoe UI", Arial, sans-serif;
 }
 
 code,
@@ -28,6 +32,12 @@ pre {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(38, 31, 19, 0.2);
+  background: rgba(190, 174, 255, 0.28);
   border-radius: 3px;
+}
+
+select,
+input,
+textarea {
+  color-scheme: dark;
 }
