@@ -21,6 +21,10 @@ import { api } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
 import { useI18n } from "../i18n";
 
+const CANARY_AGENT_ID = "product";
+const CANARY_PROJECT_ID = "Product";
+const CANARY_EXPECTED_MODE = "v2-write";
+
 interface V2InspectorProps {
   ctx: AppContext;
 }
@@ -159,9 +163,6 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const loadOps = async () => {
     const agentId = ctx.agentId || undefined;
     const projectId = ctx.projectId || undefined;
-    const canaryAgentId = "product";
-    const canaryProjectId = "Product";
-    const expectedMode = "v2-write";
     const [candidateRes, statusRes, relationRes, grayRes, fixtureRes, auditRes, canaryRes] = await Promise.all([
       api.getV2Candidates(agentId, projectId),
       api.getV2ConsolidationStatus(agentId, projectId),
@@ -169,7 +170,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       api.getV2GrayStatus(agentId, projectId),
       api.getV2BenchFixtures(),
       api.getV2RecallAudit(agentId, projectId, 12),
-      api.getV2CanaryStatus({ agentId: canaryAgentId, projectId: canaryProjectId, expectedMode }),
+      api.getV2CanaryStatus({ agentId: CANARY_AGENT_ID, projectId: CANARY_PROJECT_ID, expectedMode: CANARY_EXPECTED_MODE }),
     ]);
     setCandidates(candidateRes.candidates);
     setCandidateStats(statusRes.candidateStats);
@@ -195,7 +196,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const startWorker = async () => {
-    const res = await api.startV2ConsolidationWorker(ctx.agentId || undefined, ctx.projectId || undefined);
+    const res = await api.startV2ConsolidationWorker(CANARY_AGENT_ID, CANARY_PROJECT_ID);
     setWorker(res.status);
     await loadOps();
   };
@@ -362,16 +363,22 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                 disabled={!!loading}
                 className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50"
               >
-                Start
+                {t("v2.worker.startCanary")}
               </button>
               <button
                 onClick={() => void run("worker-stop", stopWorker)}
                 disabled={!!loading}
                 className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
               >
-                Stop
+                {t("v2.worker.stopCanary")}
               </button>
             </div>
+          </div>
+          <div className="mt-3 rounded-lg border border-line bg-deep px-3 py-2 text-xs">
+            <span className="text-muted">{t("v2.worker.scope")}: </span>
+            <span className="font-mono text-ink">
+              {worker?.agentId ?? "-"} / {worker?.projectId ?? "-"}
+            </span>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
             <Metric label="Candidates" value={candidateStats?.total ?? 0} />

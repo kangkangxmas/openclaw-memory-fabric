@@ -19,8 +19,8 @@ export function StatusBar() {
   const ok = health?.ok ?? false;
 
   return (
-    <header className="sticky top-0 z-50 border-b border-line bg-deep/92 px-5 py-3 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-[1680px] items-center justify-between gap-4">
+    <header className="sticky top-0 z-50 border-b border-line bg-deep/92 px-4 py-3 backdrop-blur-xl sm:px-5 lg:px-6">
+      <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-accent/40 bg-accent/15 text-sm font-bold text-accent">
             MF
@@ -33,7 +33,7 @@ export function StatusBar() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
           {health && (
             <>
               <span className="rounded-md border border-line bg-panel px-2 py-1 text-muted">

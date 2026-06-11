@@ -2,9 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+}
+
 body {
   margin: 0;
-  min-width: 1160px;
   background:
     radial-gradient(circle at 18% -10%, rgba(139, 92, 246, 0.24), transparent 34%),
     radial-gradient(circle at 84% 0%, rgba(217, 70, 239, 0.16), transparent 30%),
