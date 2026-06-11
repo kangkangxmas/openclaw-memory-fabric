@@ -17,6 +17,7 @@
     "test:e2e": "node --test scripts/e2e/e2e.test.mjs",
     "v2:gray-smoke": "node scripts/v2-gray-smoke.mjs",
     "v2:commit-smoke": "node scripts/v2-commit-smoke.mjs",
+    "v2:canary-monitor": "node scripts/v2-canary-monitor.mjs",
     "lint": "eslint packages/plugin/src packages/plugin/test packages/sidecar/src packages/sidecar/test",
     "lint:fix": "eslint packages/plugin/src packages/plugin/test packages/sidecar/src packages/sidecar/test --fix",
     "format": "prettier --write \"packages/*/src/**/*.ts\" \"packages/*/test/**/*.ts\"",

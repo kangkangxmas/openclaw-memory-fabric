@@ -77,6 +77,7 @@ export function registerV2Routes(
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
   };
+  const parseNumberWithDefault = (value: string | undefined, fallback: number): number => parseOptionalNumber(value) ?? fallback;
   const shouldAutoStartWorker = (): boolean => {
     const raw = process.env.MEMORY_FABRIC_CONSOLIDATION_WORKER?.toLowerCase();
     return raw === "auto" || raw === "on" || raw === "true" || raw === "1";
@@ -671,6 +672,145 @@ export function registerV2Routes(
         latencyReady: latestBench ? latestBench.p95LatencyMs <= 300 : false,
         candidateQueueHealthy: candidateStats.byStatus.pending < 100 && candidateStats.byStatus.needs_review < 50,
       },
+    };
+  });
+
+  app.get<{
+    Querystring: {
+      agentId?: string;
+      projectId?: string;
+      expectedMode?: string;
+      maxPending?: string;
+      maxNeedsReview?: string;
+      minCandidateSourceCoverage?: string;
+      maxP95LatencyMs?: string;
+      candidateLimit?: string;
+      auditLimit?: string;
+    };
+  }>("/v2/canary/status", async (request) => {
+    const agentId = request.query.agentId ?? "product";
+    const projectId = request.query.projectId ?? "Product";
+    const mode = resolveV2Mode(agentId);
+    const expectedMode = request.query.expectedMode;
+    const maxPending = parseNumberWithDefault(request.query.maxPending, 25);
+    const maxNeedsReview = parseNumberWithDefault(request.query.maxNeedsReview, 10);
+    const minCandidateSourceCoverage = parseNumberWithDefault(request.query.minCandidateSourceCoverage, 0.98);
+    const maxP95LatencyMs = parseNumberWithDefault(request.query.maxP95LatencyMs, 300);
+    const candidateLimit = parseNumberWithDefault(request.query.candidateLimit, 200);
+    const auditLimit = parseNumberWithDefault(request.query.auditLimit, 50);
+
+    const [candidateStats, candidates, latestBench, auditEntries] = await Promise.all([
+      atomicStore.stats({ agentId, projectId, limit: 10_000 }),
+      atomicStore.listAll({ agentId, projectId, limit: candidateLimit }),
+      benchRunner.latest(),
+      recallAudit.list({ agentId, projectId, limit: auditLimit }),
+    ]);
+    const worker = consolidationWorker.status();
+    const candidatesWithSourceRefs = candidates.filter((candidate) => candidate.sourceRefs.length > 0).length;
+    const candidateSourceCoverage = candidates.length > 0 ? candidatesWithSourceRefs / candidates.length : 1;
+    const auditEvidenceCounts = auditEntries.map((entry) => entry.v2?.evidenceCount ?? 0);
+    const auditCardCounts = auditEntries.map((entry) => entry.v2?.cardCount ?? 0);
+    const auditLatencyValues = auditEntries
+      .map((entry) => entry.v2?.executionTimeMs)
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    const avg = (values: number[]): number => values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+    const checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message: string; value?: unknown }> = [];
+
+    checks.push({
+      id: "mode",
+      status: expectedMode ? (mode === expectedMode ? "pass" : "fail") : isV2RecallReady(mode) ? "pass" : "warn",
+      message: expectedMode ? `mode should be ${expectedMode}` : "mode should allow v2 recall",
+      value: mode,
+    });
+    checks.push({
+      id: "worker_running",
+      status: worker.running ? "pass" : "warn",
+      message: "ConsolidationWorker should be running for v2-write canary",
+      value: worker.running,
+    });
+    checks.push({
+      id: "worker_scope",
+      status:
+        !worker.running || (worker.agentId === agentId && worker.projectId === projectId)
+          ? "pass"
+          : "fail",
+      message: "ConsolidationWorker should target the canary agent/project",
+      value: { agentId: worker.agentId, projectId: worker.projectId },
+    });
+    checks.push({
+      id: "candidate_queue",
+      status:
+        candidateStats.byStatus.pending <= maxPending && candidateStats.byStatus.needs_review <= maxNeedsReview
+          ? "pass"
+          : "fail",
+      message: "candidate queue should stay below canary thresholds",
+      value: {
+        pending: candidateStats.byStatus.pending,
+        needsReview: candidateStats.byStatus.needs_review,
+        maxPending,
+        maxNeedsReview,
+      },
+    });
+    checks.push({
+      id: "candidate_source_refs",
+      status: candidateSourceCoverage >= minCandidateSourceCoverage ? "pass" : "fail",
+      message: "recent candidates should carry sourceRefs",
+      value: {
+        coverage: candidateSourceCoverage,
+        checked: candidates.length,
+        required: minCandidateSourceCoverage,
+        sourceLessCandidateIds: candidates
+          .filter((candidate) => candidate.sourceRefs.length === 0)
+          .slice(0, 10)
+          .map((candidate) => candidate.candidateId),
+      },
+    });
+    checks.push({
+      id: "recall_audit",
+      status: auditEntries.length > 0 ? "pass" : "warn",
+      message: "recall audit should appear after real v2 recall traffic",
+      value: {
+        count: auditEntries.length,
+        avgV2CardCount: avg(auditCardCounts),
+        avgV2EvidenceCount: avg(auditEvidenceCounts),
+        avgV2ExecutionTimeMs: avg(auditLatencyValues),
+      },
+    });
+    checks.push({
+      id: "bench_latency",
+      status: !latestBench ? "warn" : latestBench.p95LatencyMs <= maxP95LatencyMs ? "pass" : "fail",
+      message: "latest bench P95 latency should stay below threshold when a bench exists",
+      value: latestBench ? { p95LatencyMs: latestBench.p95LatencyMs, maxP95LatencyMs } : null,
+    });
+    checks.push({
+      id: "bench_source_coverage",
+      status: !latestBench ? "warn" : latestBench.sourceCoverage >= 0.98 ? "pass" : "fail",
+      message: "latest bench source coverage should meet the rollout threshold when a bench exists",
+      value: latestBench ? { sourceCoverage: latestBench.sourceCoverage, required: 0.98 } : null,
+    });
+
+    const hasFail = checks.some((check) => check.status === "fail");
+    const hasWarn = checks.some((check) => check.status === "warn");
+
+    return {
+      ok: true,
+      status: hasFail ? "fail" : hasWarn ? "warn" : "ready",
+      mode,
+      expectedMode,
+      agentId,
+      projectId,
+      worker,
+      candidateStats,
+      candidateSourceCoverage,
+      recallAudit: {
+        count: auditEntries.length,
+        lastAt: auditEntries[0]?.createdAt,
+        avgV2CardCount: avg(auditCardCounts),
+        avgV2EvidenceCount: avg(auditEvidenceCounts),
+        avgV2ExecutionTimeMs: avg(auditLatencyValues),
+      },
+      bench: latestBench,
+      checks,
     };
   });
 

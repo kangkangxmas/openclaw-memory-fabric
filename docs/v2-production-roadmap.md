@@ -158,12 +158,14 @@ pnpm v2:gray-smoke -- \
 - `GET /v2/carriers/projection/history`
 - `GET /v2/graph/relations`
 - `GET /v2/gray/status`
+- `GET /v2/canary/status`
 - `GET /v2/bench/fixtures`
 - `POST /v2/bench/fixtures`
 - `POST /v2/bench/seed`
 - `POST /v2/bench/run`
 - `GET /v2/bench/report`
 - `pnpm v2:gray-smoke -- ...`
+- `pnpm v2:canary-monitor -- ...`
 
 保持兼容：
 
@@ -189,7 +191,40 @@ pnpm -C packages/plugin test
 pnpm -C packages/web build
 ```
 
-## 6. 切主 Checklist
+## 6. v2-write Canary 巡检
+
+棱镜（`product` / `Product`）进入 `v2-write` 后，日常巡检优先使用只读 monitor，避免写入 smoke 记忆污染真实上下文。
+
+```bash
+pnpm v2:canary-monitor -- \
+  --agent-id product \
+  --project-id Product \
+  --expected-mode v2-write \
+  --strict
+```
+
+巡检关注：
+
+- `mode` 必须是 `v2-write`。
+- ConsolidationWorker 必须运行，并指向 `product / Product`。
+- `pending` 和 `needs_review` 不应持续堆积。
+- 最近 candidate 的 `sourceRefs` 覆盖率应 >= 0.98。
+- 有真实 v2 recall 流量后，`recallAudit` 应出现 cards/evidence 指标。
+- 有 bench report 时，source coverage 和 P95 latency 必须继续满足门槛。
+
+第 3 项（V2 Inspector Source Trace / Candidate Review）建议在以下任一条件满足时启动：
+
+- 棱镜完成 2-3 轮真实会话，产生足够 candidate 和 recall audit。
+- `needs_review` 或 `rejected` 开始出现，需要人工解释和处理。
+- 准备把第二个 Agent 加入 `v2-write` 前，需要可视化证据链。
+
+第 4 项（Carrier 投影治理）建议在 Inspector 可解释性可用后启动；不要早于 Source Trace / Candidate Review。进入条件：
+
+- v2-write canary 连续 48 小时没有 pending/needs_review 堆积。
+- Source Trace 能确认稳定 memory 都能追到 L0 event。
+- 已有真实 promoted memory，可安全验证 Carrier apply/rollback。
+
+## 7. 切主 Checklist
 
 - `development` Agent 在 `v2-recall` 下稳定使用至少一个真实开发周期。
 - `/v2/recall/audit` 中 v2 card count、evidence count、legacy source count 没有持续异常。
@@ -198,7 +233,7 @@ pnpm -C packages/web build
 - Bench 达到验收门槛。
 - 旧 `/recall`、旧 Carrier、旧 JSONL 回退路径已验证。
 
-## 7. 回滚 Checklist
+## 8. 回滚 Checklist
 
 - 将 `MEMORY_FABRIC_V2_MODE` 改回 `shadow` 或 `off`。
 - 停止 worker：`POST /v2/consolidation/worker/stop`。

@@ -489,6 +489,18 @@ describe("Memory Fabric V2", () => {
       expect(productStatusBody.mode).toBe("v2-write");
       expect(productStatusBody.readiness.modeReady).toBe(true);
 
+      const canaryStatusRes = await app.inject({
+        method: "GET",
+        url: "/v2/canary/status?agentId=product&projectId=Product&expectedMode=v2-write",
+      });
+      const canaryStatusBody = JSON.parse(canaryStatusRes.body);
+      expect(canaryStatusBody.mode).toBe("v2-write");
+      expect(canaryStatusBody.status).toBe("warn");
+      expect(canaryStatusBody.candidateSourceCoverage).toBe(1);
+      expect(canaryStatusBody.checks.find((check: { id: string }) => check.id === "mode")?.status).toBe("pass");
+      expect(canaryStatusBody.checks.find((check: { id: string }) => check.id === "candidate_source_refs")?.status).toBe("pass");
+      expect(canaryStatusBody.checks.find((check: { id: string }) => check.id === "worker_running")?.status).toBe("warn");
+
       const developmentStatusRes = await app.inject({
         method: "GET",
         url: "/v2/gray/status?agentId=development&projectId=openclaw",

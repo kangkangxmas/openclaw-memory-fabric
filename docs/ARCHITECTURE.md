@@ -535,6 +535,7 @@ React 18 + Vite + TypeScript + Tailwind CSS 构建的 SPA，通过 `@fastify/sta
 | POST | `/v2/consolidation/worker/stop` | 停止巩固 worker | v2 Phase 1 |
 | GET | `/v2/consolidation/status` | worker 状态和 candidate stats | v2 Phase 1 |
 | GET | `/v2/gray/status` | 灰度汇总状态和 readiness flags | v2 Milestone A |
+| GET | `/v2/canary/status` | 单 Agent v2-write 只读巡检状态 | v2 Milestone C |
 | POST | `/v2/recall/plan` | 可解释检索计划和 memory cards | v2 Phase 2 |
 | POST | `/v2/recall/audit` | 写入 legacy/v2 recall 对照日志 | v2 Phase 2 |
 | GET | `/v2/recall/audit` | 查询 recall 对照日志 | v2 Phase 2 |

@@ -252,6 +252,39 @@ Response 包含：
 - `bench`：最新 Bench report，可能为 `null`
 - `readiness`：`modeReady`、`sourceCoverageReady`、`latencyReady`、`candidateQueueHealthy`
 
+### GET /v2/canary/status
+
+返回单 Agent v2-write 灰度巡检状态。该接口只读，不写 smoke 记忆，也不 seed bench fixture。
+
+Query:
+
+- `agentId` 默认 `product`
+- `projectId` 默认 `Product`
+- `expectedMode` 可选；棱镜灰度应传 `v2-write`
+- `maxPending` 默认 `25`
+- `maxNeedsReview` 默认 `10`
+- `minCandidateSourceCoverage` 默认 `0.98`
+- `maxP95LatencyMs` 默认 `300`
+- `candidateLimit` 默认 `200`
+- `auditLimit` 默认 `50`
+
+Response 包含：
+
+- `status`：`ready`、`warn` 或 `fail`
+- `mode`：当前 `agentId` 的有效 v2 模式
+- `worker`：ConsolidationWorker 状态和当前作用域
+- `candidateStats`：pending、needs_review、rejected、promoted 计数
+- `candidateSourceCoverage`：最近 candidate 样本中带 `sourceRefs` 的比例
+- `recallAudit`：最近 v2 recall audit 数量、平均 cards/evidence/latency
+- `bench`：最新 bench report，可能为 `null`
+- `checks`：逐项巡检结果。`fail` 用于阻断继续扩灰；`warn` 用于提示还缺真实流量或 bench。
+
+命令行巡检：
+
+```bash
+pnpm v2:canary-monitor -- --agent-id product --project-id Product --strict
+```
+
 ### POST /v2/recall/plan
 
 返回可解释检索计划、稳定记忆、memory cards 和渲染文本。
