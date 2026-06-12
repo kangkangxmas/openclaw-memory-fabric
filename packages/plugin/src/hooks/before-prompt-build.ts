@@ -37,6 +37,7 @@ export function createBeforePromptBuildHandler(
     const projectId = ctx.workspaceDir ? path.basename(ctx.workspaceDir) : undefined;
     const messages = event.messages ?? [];
     const latestUser = [...messages].reverse().find((m) => m.role === "user");
+    const latestMessage = latestUser ? extractTextContent(latestUser.content) : event.prompt;
     const start = Date.now();
 
     await client.carrierInit(agentId, projectId).catch(() => {
@@ -48,7 +49,7 @@ export function createBeforePromptBuildHandler(
       result = await orchestrator.execute({
         agentId,
         projectId,
-        latestMessage: latestUser ? extractTextContent(latestUser.content) : undefined,
+        latestMessage,
         messageCount: messages.length
       });
       metrics.recordRecall(Date.now() - start);

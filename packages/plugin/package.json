@@ -6,7 +6,19 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "openclaw": {
-    "extensions": ["./dist/index.js"]
+    "plugin": true,
+    "extensions": ["./dist/index.js"],
+    "hooks": [
+      "before_prompt_build",
+      "agent_end",
+      "before_tool_call",
+      "after_tool_call"
+    ],
+    "configKey": "memory-fabric",
+    "compat": {
+      "pluginApi": ">=2026.5.25",
+      "minGatewayVersion": "2026.5.25"
+    }
   },
   "files": [
     "dist",

@@ -3,10 +3,13 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createBeforePromptBuildHandler } from "../src/hooks/before-prompt-build.js";
 import { createBeforeToolCallHandler } from "../src/hooks/before-tool-call.js";
 import { createAfterToolCallHandler } from "../src/hooks/after-tool-call.js";
 import type { Logger } from "../src/utils/logger.js";
+import type { SidecarClient } from "../src/utils/sidecar-client.js";
 import type { HookAgentContext } from "../src/hooks/types.js";
+import type { MemoryFabricConfig } from "../src/types/index.js";
 
 // ---------------------------------------------------------------------------
 // Minimal logger stub that captures log calls
@@ -29,6 +32,103 @@ const stubCtx: HookAgentContext = {
   agentId: "agent-a",
   workspaceDir: "/tmp/test-workspace"
 } as HookAgentContext;
+
+const testConfig: MemoryFabricConfig = {
+  defaultScope: "project",
+  recallBudget: {
+    l0Tokens: 600,
+    l1Tokens: 1800,
+    l2Tokens: 5000
+  },
+  sidecar: {
+    baseUrl: "http://127.0.0.1:7811",
+    timeoutMs: 5000
+  },
+  openviking: {
+    mode: "local",
+    basePath: ".openviking",
+    targetRoot: ""
+  },
+  graphify: {
+    basePath: ".graphify",
+    autoBootstrap: false,
+    autoRefresh: "manual"
+  },
+  publishPolicy: {
+    defaultVisibility: "project_shared",
+    allowOrgShared: false
+  },
+  observability: {
+    logLevel: "info",
+    emitMetrics: false
+  }
+};
+
+// ---------------------------------------------------------------------------
+// before_prompt_build
+// ---------------------------------------------------------------------------
+
+describe("before_prompt_build hook", () => {
+  it("uses event.prompt as the recall query when messages do not include a user turn", async () => {
+    const previousMode = process.env.MEMORY_FABRIC_V2_MODE;
+    process.env.MEMORY_FABRIC_V2_MODE = "v2-write";
+
+    const queries: string[] = [];
+    const client = {
+      carrierInit: async () => ({ ok: true }),
+      recallPlan: async (req: { query: string }) => {
+        queries.push(req.query);
+        return {
+          ok: true,
+          plan: {
+            query: req.query,
+            intent: "fact_confirmation",
+            reason: "test"
+          },
+          cards: [
+            {
+              memoryId: "mem-1",
+              type: "fact",
+              time: "2026-06-12T00:00:00.000Z",
+              confidence: 0.9,
+              content: "Memory card from v2 recall.",
+              evidence: ["evt-1"]
+            }
+          ],
+          rendered: "Memory card from v2 recall.",
+          executionTimeMs: 1
+        };
+      },
+      recall: async () => ({
+        memoryBrief: "",
+        sources: [],
+        budgetUsed: 0
+      }),
+      recallAudit: async () => ({ ok: true })
+    } as unknown as SidecarClient;
+
+    try {
+      const { logger } = makeLogger();
+      const handler = createBeforePromptBuildHandler(
+        client,
+        testConfig,
+        logger,
+        { recordRecall: () => undefined } as never
+      );
+      const result = await handler(
+        { prompt: "真实普通问题", messages: [] },
+        { agentId: "product", workspaceDir: "/tmp/Product" }
+      );
+
+      assert.deepEqual(queries, ["真实普通问题"]);
+      assert.match(result?.prependContext ?? "", /memory-fabric:begin/);
+      assert.match(result?.prependContext ?? "", /Memory card from v2 recall/);
+    } finally {
+      if (previousMode === undefined) delete process.env.MEMORY_FABRIC_V2_MODE;
+      else process.env.MEMORY_FABRIC_V2_MODE = previousMode;
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // before_tool_call

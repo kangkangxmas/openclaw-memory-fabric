@@ -161,8 +161,15 @@ function createJsonTool(params: {
  * The gateway resolves `register` (or `activate`) from the module export.
  */
 export function register(api: {
+  registrationMode?: string;
   on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
   registerTool: (tool: unknown) => void;
+  logger?: {
+    info?: (message: string) => void;
+    warn?: (message: string) => void;
+    error?: (message: string) => void;
+    debug?: (message: string) => void;
+  };
 }) {
   const instance = createPlugin();
 
@@ -393,8 +400,43 @@ export function register(api: {
     })
   );
 
-  api.on("before_prompt_build", instance.hooks.before_prompt_build as (event: unknown, ctx: unknown) => unknown);
+  api.on("before_prompt_build", async (event: unknown, ctx: unknown) => {
+    const agentId = (ctx as { agentId?: string } | undefined)?.agentId ?? "unknown";
+    const workspaceDir = (ctx as { workspaceDir?: string } | undefined)?.workspaceDir;
+    const promptChars =
+      typeof (event as { prompt?: unknown } | undefined)?.prompt === "string"
+        ? ((event as { prompt: string }).prompt.length)
+        : 0;
+    const v2Mode = process.env.MEMORY_FABRIC_V2_MODE ?? "unset";
+    api.logger?.info?.(
+      `[memory-fabric] before_prompt_build invoked agent=${agentId} workspace=${workspaceDir ?? "unknown"} promptChars=${promptChars} v2Mode=${v2Mode}`
+    );
+    const result = await instance.hooks.before_prompt_build(
+      event as Parameters<typeof instance.hooks.before_prompt_build>[0],
+      ctx as Parameters<typeof instance.hooks.before_prompt_build>[1]
+    );
+    const prependChars = typeof result?.prependContext === "string" ? result.prependContext.length : 0;
+    const usedV2Cards = result?.prependContext?.includes("v2:recall-plan:") === true;
+    api.logger?.info?.(
+      `[memory-fabric] before_prompt_build completed agent=${agentId} prependChars=${prependChars} usedV2Cards=${usedV2Cards}`
+    );
+    return result;
+  });
   api.on("agent_end", instance.hooks.agent_end as (event: unknown, ctx: unknown) => unknown);
   api.on("before_tool_call", instance.hooks.before_tool_call as (event: unknown, ctx: unknown) => unknown);
   api.on("after_tool_call", instance.hooks.after_tool_call as (event: unknown, ctx: unknown) => unknown);
+  api.logger?.info?.(
+    `[memory-fabric] registered ${PLUGIN_VERSION} mode=${api.registrationMode ?? "unknown"} (tools=12 hooks=before_prompt_build,agent_end,before_tool_call,after_tool_call)`
+  );
 }
+
+const plugin = {
+  id: PLUGIN_NAME,
+  name: "OpenClaw Memory Fabric",
+  version: PLUGIN_VERSION,
+  description:
+    "Multi-agent memory orchestration plugin for OpenClaw with prompt recall, commit hooks, carriers, and v2 memory cards.",
+  register
+};
+
+export default plugin;
