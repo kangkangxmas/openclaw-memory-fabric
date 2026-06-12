@@ -35,10 +35,12 @@ type CandidateFilter = V2Candidate["status"] | "all";
 type CandidateRetryStatus = Extract<V2Candidate["status"], "needs_review" | "rejected">;
 type CandidateSort = "updated_desc" | "confidence_asc" | "source_refs_asc";
 type TraceRecord = Record<string, unknown>;
+type RolloutScope = Pick<V2RolloutModeRow, "agentId" | "projectId">;
 
 const candidateFilters: CandidateFilter[] = ["all", "pending", "needs_review", "rejected", "promoted"];
 const candidateSorts: CandidateSort[] = ["updated_desc", "confidence_asc", "source_refs_asc"];
 const rolloutModes: V2Mode[] = ["off", "shadow", "v2-recall", "v2-write"];
+const rolloutScopeStorageKey = "memory-fabric:v2-rollout-scopes";
 
 function pct(value: number): string {
   return `${Math.round(value * 100)}%`;
@@ -84,6 +86,13 @@ function jsonPreview(value: unknown, limit = 240): string {
 
 function rolloutKey(row: Pick<V2RolloutModeRow, "agentId" | "projectId">): string {
   return `${row.agentId}::${row.projectId ?? ""}`;
+}
+
+function normalizeRolloutScope(scope: RolloutScope): RolloutScope | null {
+  const agentId = scope.agentId.trim();
+  const projectId = scope.projectId?.trim();
+  if (!agentId) return null;
+  return { agentId, projectId: projectId || undefined };
 }
 
 function statusBadgeClass(status: "pass" | "warn" | "fail" | "ready" | string): string {
@@ -134,6 +143,9 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const [recallAudit, setRecallAudit] = useState<V2RecallAuditEntry[]>([]);
   const [rollout, setRollout] = useState<V2RolloutModesResponse | null>(null);
   const [modeDrafts, setModeDrafts] = useState<Record<string, V2Mode>>({});
+  const [manualScopes, setManualScopes] = useState<RolloutScope[]>([]);
+  const [manualAgentId, setManualAgentId] = useState("");
+  const [manualProjectId, setManualProjectId] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -148,6 +160,30 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       setLoading(null);
     }
   };
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(rolloutScopeStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as RolloutScope[];
+      const next = new Map<string, RolloutScope>();
+      for (const item of parsed) {
+        const scope = normalizeRolloutScope(item);
+        if (scope) next.set(rolloutKey(scope), scope);
+      }
+      setManualScopes([...next.values()]);
+    } catch {
+      /* ignore malformed local state */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(rolloutScopeStorageKey, JSON.stringify(manualScopes));
+    } catch {
+      /* ignore unavailable storage */
+    }
+  }, [manualScopes]);
 
   const loadRecall = async () => {
     if (!query.trim()) return;
@@ -177,9 +213,38 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setDrift(res.report);
   };
 
+  const loadRolloutScopes = async (): Promise<RolloutScope[]> => {
+    const scopeMap = new Map<string, RolloutScope>();
+    const add = (scope: RolloutScope) => {
+      const normalized = normalizeRolloutScope(scope);
+      if (normalized) scopeMap.set(rolloutKey(normalized), normalized);
+    };
+
+    for (const scope of manualScopes) add(scope);
+    add({ agentId: CANARY_AGENT_ID, projectId: CANARY_PROJECT_ID });
+    add({ agentId: ctx.agentId, projectId: ctx.projectId || undefined });
+
+    const agents = ctx.agents.length > 0 ? ctx.agents : ctx.agentId ? [ctx.agentId] : [];
+    await Promise.all(agents.map(async (agentId) => {
+      try {
+        const res = await api.getProjects(agentId);
+        if (res.ok && res.projects.length > 0) {
+          for (const projectId of res.projects) add({ agentId, projectId });
+        } else {
+          add({ agentId });
+        }
+      } catch {
+        add({ agentId });
+      }
+    }));
+
+    return [...scopeMap.values()].sort((a, b) => a.agentId.localeCompare(b.agentId) || (a.projectId ?? "").localeCompare(b.projectId ?? ""));
+  };
+
   const loadOps = async () => {
     const agentId = ctx.agentId || undefined;
     const projectId = ctx.projectId || undefined;
+    const rolloutScopes = await loadRolloutScopes();
     const [candidateRes, statusRes, grayRes, fixtureRes, auditRes, canaryRes, rolloutRes] = await Promise.all([
       api.getV2Candidates(agentId, projectId),
       api.getV2ConsolidationStatus(agentId, projectId),
@@ -187,7 +252,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       api.getV2BenchFixtures(),
       api.getV2RecallAudit(agentId, projectId, 12),
       api.getV2CanaryStatus({ agentId: CANARY_AGENT_ID, projectId: CANARY_PROJECT_ID, expectedMode: CANARY_EXPECTED_MODE }),
-      api.getV2RolloutModes({ agentIds: ctx.agents, agentId, projectId }),
+      api.getV2RolloutModes({ scopes: rolloutScopes, agentId, projectId }),
     ]);
     setCandidates(candidateRes.candidates);
     setCandidateStats(statusRes.candidateStats);
@@ -214,6 +279,12 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     void run("ops", loadOps);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx.agentId, ctx.projectId]);
+
+  useEffect(() => {
+    if (!ctx.agentId) return;
+    void run("ops", loadOps);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualScopes]);
 
   const reviewCandidate = async (candidate: V2Candidate, decision: "approve" | "reject") => {
     const messageKey = decision === "approve" ? "v2.confirm.approveCandidate" : "v2.confirm.rejectCandidate";
@@ -276,6 +347,33 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       reason: "inspector rollback",
     });
     await loadOps();
+  };
+
+  const emergencyOff = async (row: V2RolloutModeRow) => {
+    if (!window.confirm(`${t("v2.confirm.emergencyOff")}\n${row.agentId} / ${row.projectId || "*"}`)) return;
+    await api.setV2RolloutMode({
+      agentId: row.agentId,
+      projectId: row.projectId,
+      mode: "off",
+      reason: "inspector emergency off",
+    });
+    await loadOps();
+  };
+
+  const addManualScope = async () => {
+    const scope = normalizeRolloutScope({ agentId: manualAgentId, projectId: manualProjectId });
+    if (!scope) return;
+    setManualScopes((prev) => {
+      const next = new Map(prev.map((item) => [rolloutKey(item), item]));
+      next.set(rolloutKey(scope), scope);
+      return [...next.values()].sort((a, b) => a.agentId.localeCompare(b.agentId) || (a.projectId ?? "").localeCompare(b.projectId ?? ""));
+    });
+    setManualAgentId("");
+    setManualProjectId("");
+  };
+
+  const removeManualScope = async (scope: RolloutScope) => {
+    setManualScopes((prev) => prev.filter((item) => rolloutKey(item) !== rolloutKey(scope)));
   };
 
   const applyProjection = async () => {
@@ -474,8 +572,51 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             </button>
           </div>
         </div>
+        <div className="border-b border-line px-4 py-3">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <div className="text-xs font-bold text-ink">{t("v2.rollout.addScope")}</div>
+              <div className="mt-1 text-xs text-muted">{t("v2.rollout.addScopeDesc")}</div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                value={manualAgentId}
+                onChange={(event) => setManualAgentId(event.target.value)}
+                placeholder={t("v2.rollout.agentPlaceholder")}
+                className="rounded-lg border border-line bg-deep px-3 py-2 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              <input
+                value={manualProjectId}
+                onChange={(event) => setManualProjectId(event.target.value)}
+                placeholder={t("v2.rollout.projectPlaceholder")}
+                className="rounded-lg border border-line bg-deep px-3 py-2 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              <button
+                onClick={() => void run("rollout-add-scope", addManualScope)}
+                disabled={!!loading || !manualAgentId.trim()}
+                className="px-3 py-2 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
+              >
+                {t("v2.rollout.add")}
+              </button>
+            </div>
+          </div>
+          {manualScopes.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {manualScopes.map((scope) => (
+                <button
+                  key={rolloutKey(scope)}
+                  onClick={() => void run(`rollout-remove-${rolloutKey(scope)}`, () => removeManualScope(scope))}
+                  className="rounded border border-line bg-deep px-2 py-1 text-xs text-muted hover:border-red-400/40 hover:text-red-200"
+                  title={t("v2.rollout.removeManual")}
+                >
+                  {scope.agentId} / {scope.projectId || t("v2.rollout.allProjects")} ×
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-xs">
+          <table className="w-full min-w-[1120px] text-xs">
             <thead className="bg-panel text-muted">
               <tr className="border-b border-line">
                 <th className="px-4 py-2 text-left font-medium">{t("v2.rollout.scope")}</th>
@@ -525,9 +666,22 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                       {row.reason && <div className="mt-1 max-w-[180px] text-muted">{clip(row.reason, 80)}</div>}
                     </td>
                     <td className="px-4 py-3 text-muted">
-                      <div>{row.candidateStats.byStatus.pending} pending · {row.candidateStats.byStatus.needs_review} review</div>
-                      <div className="mt-1">{row.recallAudit.count} audits</div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CompactBadge status={row.health?.status ?? "default"}>{row.health?.status ?? "-"}</CompactBadge>
+                        <span>{row.candidateStats.byStatus.pending} pending · {row.candidateStats.byStatus.needs_review} review</span>
+                      </div>
+                      <div className="mt-1">{row.recallAudit.count} audits · source {pct(row.health?.candidateSourceCoverage ?? 1)}</div>
+                      {row.health && row.health.sourceLessCandidates > 0 && (
+                        <div className="mt-1 text-red-200">{row.health.sourceLessCandidates} missing sourceRefs</div>
+                      )}
                       {row.recallAudit.lastAt && <div className="mt-1">{formatTime(row.recallAudit.lastAt)}</div>}
+                      {row.health && row.health.warnings.length > 0 && (
+                        <div className="mt-2 flex max-w-[260px] flex-wrap gap-1">
+                          {row.health.warnings.slice(0, 3).map((warning) => (
+                            <CompactBadge key={warning} status="warn">{warning}</CompactBadge>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-muted">
                       <div>{formatTime(row.updatedAt)}</div>
@@ -551,9 +705,16 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                       <button
                         onClick={() => void run(`rollout-worker-${key}`, () => startWorkerFor(row))}
                         disabled={!!loading}
-                        className="px-2 py-1 border border-line rounded text-xs text-ink disabled:opacity-40"
+                        className="mr-2 px-2 py-1 border border-line rounded text-xs text-ink disabled:opacity-40"
                       >
                         {t("v2.rollout.worker")}
+                      </button>
+                      <button
+                        onClick={() => void run(`rollout-off-${key}`, () => emergencyOff(row))}
+                        disabled={!!loading || row.mode === "off"}
+                        className="px-2 py-1 border border-red-400/40 rounded text-xs text-red-200 disabled:opacity-40"
+                      >
+                        {t("v2.rollout.emergencyOff")}
                       </button>
                     </td>
                   </tr>

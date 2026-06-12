@@ -508,6 +508,22 @@ describe("Memory Fabric V2", () => {
       const developmentStatusBody = JSON.parse(developmentStatusRes.body);
       expect(developmentStatusBody.mode).toBe("v2-recall");
       expect(developmentStatusBody.readiness.modeReady).toBe(true);
+
+      const rolloutModesRes = await app.inject({
+        method: "GET",
+        url: "/v2/rollout/modes?scopes=product::Product,development::openclaw,ops::Ops",
+      });
+      const rolloutModesBody = JSON.parse(rolloutModesRes.body);
+      const productRow = rolloutModesBody.modes.find((row: { agentId: string; projectId?: string }) => row.agentId === "product" && row.projectId === "Product");
+      const opsRow = rolloutModesBody.modes.find((row: { agentId: string; projectId?: string }) => row.agentId === "ops" && row.projectId === "Ops");
+
+      expect(rolloutModesBody.ok).toBe(true);
+      expect(productRow.mode).toBe("v2-write");
+      expect(productRow.health.candidateSourceCoverage).toBe(1);
+      expect(productRow.health.candidateQueueHealthy).toBe(true);
+      expect(productRow.health.warnings).toContain("recall_audit_missing");
+      expect(opsRow.mode).toBe("v2-recall");
+      expect(opsRow.health.candidateSourceCoverage).toBe(1);
     } finally {
       await app.close();
       restoreEnv(previousEnv);

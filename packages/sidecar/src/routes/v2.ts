@@ -91,12 +91,18 @@ export function registerV2Routes(
     if (!agentId) return;
     scopes.set(scopeKey(agentId, projectId), { agentId, projectId });
   };
-  const collectRolloutScopes = async (opts: { agentIds?: string; projectIds?: string; agentId?: string; projectId?: string }) => {
+  const parseScopeList = (value?: string): Array<{ agentId: string; projectId?: string }> =>
+    splitList(value).map((item) => {
+      const [agentId, projectId] = item.includes("::") ? item.split("::", 2) : item.split("/", 2);
+      return { agentId, projectId: projectId || undefined };
+    }).filter((scope) => Boolean(scope.agentId));
+  const collectRolloutScopes = async (opts: { agentIds?: string; projectIds?: string; agentId?: string; projectId?: string; scopes?: string }) => {
     const scopes = new Map<string, { agentId: string; projectId?: string }>();
     const requestedAgents = splitList(opts.agentIds);
     const requestedProjects = splitList(opts.projectIds);
 
     addScope(scopes, opts.agentId, opts.projectId);
+    for (const scope of parseScopeList(opts.scopes)) addScope(scopes, scope.agentId, scope.projectId);
     for (const agentId of requestedAgents) {
       if (requestedProjects.length > 0) {
         for (const projectId of requestedProjects) addScope(scopes, agentId, projectId);
@@ -121,11 +127,24 @@ export function registerV2Routes(
   const buildRolloutRows = async (scopes: Array<{ agentId: string; projectId?: string }>) => {
     const worker = consolidationWorker.status();
     return Promise.all(scopes.map(async (scope) => {
-      const [effective, candidateStats, audits] = await Promise.all([
+      const [effective, candidateStats, candidates, audits] = await Promise.all([
         rolloutConfig.resolveMode(scope.agentId, scope.projectId),
         atomicStore.stats({ agentId: scope.agentId, projectId: scope.projectId, limit: 10_000 }),
+        atomicStore.listAll({ agentId: scope.agentId, projectId: scope.projectId, limit: 200 }),
         recallAudit.list({ agentId: scope.agentId, projectId: scope.projectId, limit: 50 }),
       ]);
+      const sourceLessCandidates = candidates.filter((candidate) => candidate.sourceRefs.length === 0).length;
+      const candidateSourceCoverage = candidates.length > 0 ? (candidates.length - sourceLessCandidates) / candidates.length : 1;
+      const candidateQueueHealthy = candidateStats.byStatus.pending < 100 && candidateStats.byStatus.needs_review < 50;
+      const modeAllowsV2Recall = isV2RecallReady(effective.mode);
+      const recallAuditPresent = audits.length > 0;
+      const warnings = [
+        ...(!modeAllowsV2Recall && effective.mode !== "off" ? ["mode_not_v2_ready"] : []),
+        ...(!candidateQueueHealthy ? ["candidate_queue_unhealthy"] : []),
+        ...(candidateSourceCoverage < 0.98 ? ["candidate_source_refs_low"] : []),
+        ...(modeAllowsV2Recall && !recallAuditPresent ? ["recall_audit_missing"] : []),
+      ];
+      const status = !candidateQueueHealthy || candidateSourceCoverage < 0.98 ? "fail" : warnings.length > 0 ? "warn" : "ready";
       return {
         ...effective,
         candidateStats,
@@ -134,6 +153,15 @@ export function registerV2Routes(
           lastAt: audits[0]?.createdAt,
         },
         workerActive: worker.running && worker.agentId === scope.agentId && worker.projectId === scope.projectId,
+        health: {
+          status,
+          warnings,
+          candidateSourceCoverage,
+          sourceLessCandidates,
+          candidateQueueHealthy,
+          modeAllowsV2Recall,
+          recallAuditPresent,
+        },
       };
     }));
   };
@@ -699,7 +727,7 @@ export function registerV2Routes(
   });
 
   app.get<{
-    Querystring: { agentIds?: string; projectIds?: string; agentId?: string; projectId?: string };
+    Querystring: { agentIds?: string; projectIds?: string; scopes?: string; agentId?: string; projectId?: string };
   }>("/v2/rollout/modes", async (request) => {
     const scopes = await collectRolloutScopes(request.query);
     const rows = await buildRolloutRows(scopes.length > 0 ? scopes : [{ agentId: "development" }]);

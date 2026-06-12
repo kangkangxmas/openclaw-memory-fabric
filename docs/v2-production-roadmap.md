@@ -218,10 +218,12 @@ pnpm v2:canary-monitor -- \
 - `needs_review` 或 `rejected` 开始出现，需要人工解释和处理。
 - 准备把第二个 Agent 加入 `v2-write` 前，需要可视化证据链。
 
-当前已启动第 3 项 Web 巡检台改造：
+当前第 3 项 Web 巡检台基础能力已完成：
 
 - V2 Inspector 顶部接入 `GET /v2/canary/status`，默认先看只读 canary summary。
-- V2 Inspector 增加多 Agent 灰度配置面板：显示 `off / shadow / v2-recall / v2-write`、来源、队列、recall audit 和 Worker 命中状态。
+- V2 Inspector 增加多 Agent 灰度配置面板：显示 `off / shadow / v2-recall / v2-write`、来源、队列、recall audit、sourceRefs 覆盖率、health 状态和 Worker 命中状态。
+- 多 Agent 面板会自动展开已发现 Agent/Project，也允许手工添加尚未产生数据的 Agent/Project scope，便于预先切换或回滚。
+- 每个 scope 支持逐个切换、逐个回滚、定向启动 Worker 和 Emergency Off。
 - 新增 runtime rollout API：`GET /v2/rollout/effective`、`GET /v2/rollout/modes`、`POST /v2/rollout/modes`、`POST /v2/rollout/modes/rollback`。
 - plugin `before_prompt_build` 和 sidecar `/commit` 共用有效模式解析：环境 off 紧急关闭 > Inspector runtime override > 环境 allowlist > 全局模式。
 - Candidate Review 支持按状态筛选、查看 sourceRefs 数量、从 promoted memory 直达 Source Trace。

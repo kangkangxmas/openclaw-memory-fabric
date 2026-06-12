@@ -278,10 +278,18 @@ export const api = {
       ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
     ),
 
-  getV2RolloutModes: (opts?: { agentIds?: string[]; agentId?: string; projectId?: string }) =>
+  getV2RolloutModes: (opts?: {
+    agentIds?: string[];
+    agentId?: string;
+    projectId?: string;
+    scopes?: Array<{ agentId: string; projectId?: string }>;
+  }) =>
     get<V2RolloutModesResponse>(
       `/v2/rollout/modes${[
         opts?.agentIds && opts.agentIds.length > 0 ? `agentIds=${encodeURIComponent(opts.agentIds.join(","))}` : "",
+        opts?.scopes && opts.scopes.length > 0
+          ? `scopes=${encodeURIComponent(opts.scopes.map((scope) => `${scope.agentId}::${scope.projectId ?? ""}`).join(","))}`
+          : "",
         opts?.agentId ? `agentId=${encodeURIComponent(opts.agentId)}` : "",
         opts?.projectId ? `projectId=${encodeURIComponent(opts.projectId)}` : "",
       ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,

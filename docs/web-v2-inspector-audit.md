@@ -12,6 +12,9 @@
 ## 本轮已落地
 
 - V2 Inspector 顶部接入 `GET /v2/canary/status`，以只读 canary summary 作为默认健康面板。
+- V2 Inspector 增加多 Agent 灰度运维面板：按 Agent/Project scope 展示 `off / shadow / v2-recall / v2-write`、mode 来源、运行时覆盖、队列、recall audit、sourceRefs 覆盖率和 worker 命中状态。
+- 多 Agent 面板支持从已发现 agents/projects 自动生成 scope，也支持手工添加尚未产生 candidates 或 audit 的 Agent/Project；手工 scope 会保存在浏览器本地状态中。
+- 每个 scope 支持单独切换模式、回滚上一次 runtime override、定向启动单实例 ConsolidationWorker，并提供显式 Emergency Off。
 - Candidate Review 增加状态筛选、证据数量、置信度、promoted memory trace 入口和更明确的 approve/reject 禁用状态。
 - Source Trace 从原始 JSON 改为结构化视图：`memoryId/status`、`sourceRefs`、L0 events、source metadata、relation trace，并保留 raw JSON 调试入口。
 - Recall Audit 中 v2 memory ids 可直接跳转 Source Trace。
@@ -25,7 +28,7 @@
 
 ### P0：灰度运维安全
 
-- 已完成：二次确认、固定运行上下文状态条、Candidate retry/搜索/排序/失败聚合、Source Trace 缺失证据状态。
+- 已完成：多 Agent 灰度配置、逐 scope 切换/回滚/Emergency Off、二次确认、固定运行上下文状态条、Candidate retry/搜索/排序/失败聚合、Source Trace 缺失证据状态。
 - 剩余：把 projection apply/rollback 从按钮确认升级为 patch diff 审阅；这应放入 Carrier 投影治理阶段统一实现。
 
 ### P1：可解释性与效率
@@ -45,5 +48,5 @@
 ## 下一步建议
 
 1. 先在棱镜 `product / Product` 继续跑 2-3 轮真实 v2-write 会话，用本页确认 canary warning 是否只剩真实 recall audit 流量不足。
-2. 接着做 P0 的二次确认和缺失证据红色状态，这属于第 3 项收尾。
+2. 使用多 Agent 灰度面板把第二个低风险 Agent 加入 `v2-recall`，观察 pending、needs_review、sourceRefs 覆盖率和 recall audit。
 3. 再启动第 4 项 Carrier 投影治理：等 Source Trace 能稳定解释 promoted memory 后，再把 projection apply/rollback 做成可审阅 patch diff。

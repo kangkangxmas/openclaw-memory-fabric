@@ -454,6 +454,15 @@ export interface V2RolloutModeRow {
     lastAt?: string;
   };
   workerActive: boolean;
+  health?: {
+    status: "ready" | "warn" | "fail";
+    warnings: string[];
+    candidateSourceCoverage: number;
+    sourceLessCandidates: number;
+    candidateQueueHealthy: boolean;
+    modeAllowsV2Recall: boolean;
+    recallAuditPresent: boolean;
+  };
 }
 
 export interface V2RolloutModesResponse {
