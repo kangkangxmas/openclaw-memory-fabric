@@ -32,7 +32,9 @@ import type {
   V2BenchSeedResult,
   V2CanaryStatus,
   V2GrayStatus,
+  V2Mode,
   V2Relation,
+  V2RolloutModesResponse,
 } from "../types";
 
 const BASE = "";
@@ -270,4 +272,25 @@ export const api = {
         opts?.expectedMode ? `expectedMode=${encodeURIComponent(opts.expectedMode)}` : "",
       ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
     ),
+
+  getV2RolloutModes: (opts?: { agentIds?: string[]; agentId?: string; projectId?: string }) =>
+    get<V2RolloutModesResponse>(
+      `/v2/rollout/modes${[
+        opts?.agentIds && opts.agentIds.length > 0 ? `agentIds=${encodeURIComponent(opts.agentIds.join(","))}` : "",
+        opts?.agentId ? `agentId=${encodeURIComponent(opts.agentId)}` : "",
+        opts?.projectId ? `projectId=${encodeURIComponent(opts.projectId)}` : "",
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
+
+  setV2RolloutMode: (req: { agentId: string; projectId?: string; mode: V2Mode; reason?: string }) =>
+    post<{ ok: boolean }>("/v2/rollout/modes", {
+      ...req,
+      updatedBy: "inspector",
+    }),
+
+  rollbackV2RolloutMode: (req: { agentId: string; projectId?: string; reason?: string }) =>
+    post<{ ok: boolean }>("/v2/rollout/modes/rollback", {
+      ...req,
+      updatedBy: "inspector",
+    }),
 };

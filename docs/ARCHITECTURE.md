@@ -431,6 +431,15 @@ React 18 + Vite + TypeScript + Tailwind CSS 构建的 SPA，通过 `@fastify/sta
 | `MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS` | 自动 worker 运行间隔 | `30000` |
 | `MEMORY_FABRIC_CONSOLIDATION_LIMIT` | 自动 worker 每轮处理上限 | `100` |
 
+运行时灰度配置由 `V2RolloutConfigService` 管理，Inspector 的多 Agent 面板会写入持久化 runtime override。有效模式解析顺序固定为：
+
+1. `MEMORY_FABRIC_V2_OFF_AGENT_IDS`，紧急关闭优先级最高。
+2. Inspector runtime override，支持按 Agent/Project 设置和回滚。
+3. 环境 allowlist：`WRITE_AGENT_IDS`、`RECALL_AGENT_IDS`、`SHADOW_AGENT_IDS`。
+4. 全局 `MEMORY_FABRIC_V2_MODE`。
+
+plugin 的 `before_prompt_build` 会在每次召回前调用 `/v2/rollout/effective` 获取有效模式；sidecar `/commit` 也使用同一解析器，避免 Web 面板显示和真实写入/注入路径不一致。
+
 ### 5.2 可选（经验蒸馏 LLM）
 
 | 变量 | 说明 | 示例 |
@@ -534,6 +543,10 @@ React 18 + Vite + TypeScript + Tailwind CSS 构建的 SPA，通过 `@fastify/sta
 | POST | `/v2/consolidation/worker/start` | 启动巩固 worker | v2 Phase 1 |
 | POST | `/v2/consolidation/worker/stop` | 停止巩固 worker | v2 Phase 1 |
 | GET | `/v2/consolidation/status` | worker 状态和 candidate stats | v2 Phase 1 |
+| GET | `/v2/rollout/effective` | 单 Agent/Project 有效灰度模式 | v2 Milestone D |
+| GET | `/v2/rollout/modes` | 多 Agent 灰度配置与运行指标 | v2 Milestone D |
+| POST | `/v2/rollout/modes` | 设置单 Agent/Project runtime override | v2 Milestone D |
+| POST | `/v2/rollout/modes/rollback` | 回滚单 Agent/Project runtime override | v2 Milestone D |
 | GET | `/v2/gray/status` | 灰度汇总状态和 readiness flags | v2 Milestone A |
 | GET | `/v2/canary/status` | 单 Agent v2-write 只读巡检状态 | v2 Milestone C |
 | POST | `/v2/recall/plan` | 可解释检索计划和 memory cards | v2 Phase 2 |

@@ -221,6 +221,9 @@ pnpm v2:canary-monitor -- \
 当前已启动第 3 项 Web 巡检台改造：
 
 - V2 Inspector 顶部接入 `GET /v2/canary/status`，默认先看只读 canary summary。
+- V2 Inspector 增加多 Agent 灰度配置面板：显示 `off / shadow / v2-recall / v2-write`、来源、队列、recall audit 和 Worker 命中状态。
+- 新增 runtime rollout API：`GET /v2/rollout/effective`、`GET /v2/rollout/modes`、`POST /v2/rollout/modes`、`POST /v2/rollout/modes/rollback`。
+- plugin `before_prompt_build` 和 sidecar `/commit` 共用有效模式解析：环境 off 紧急关闭 > Inspector runtime override > 环境 allowlist > 全局模式。
 - Candidate Review 支持按状态筛选、查看 sourceRefs 数量、从 promoted memory 直达 Source Trace。
 - Source Trace 从 raw JSON 升级为结构化证据链视图，覆盖 L0 events、source metadata 和 relation trace。
 - Bench seed / fixture seed 已从顶部主操作移到 Bench Tools，降低误写真实 Agent 的风险。

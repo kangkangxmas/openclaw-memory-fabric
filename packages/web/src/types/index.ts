@@ -435,6 +435,44 @@ export interface V2CanaryStatus {
   checks: V2CanaryCheck[];
 }
 
+export type V2Mode = "off" | "shadow" | "v2-recall" | "v2-write";
+
+export interface V2RolloutModeRow {
+  agentId: string;
+  projectId?: string;
+  mode: V2Mode;
+  source: string;
+  baseMode: V2Mode;
+  baseSource: string;
+  canRollback: boolean;
+  updatedAt?: string;
+  updatedBy?: string;
+  reason?: string;
+  candidateStats: V2CandidateStats;
+  recallAudit: {
+    count: number;
+    lastAt?: string;
+  };
+  workerActive: boolean;
+}
+
+export interface V2RolloutModesResponse {
+  ok: boolean;
+  generatedAt: string;
+  defaultMode: V2Mode;
+  modes: V2RolloutModeRow[];
+  overrides: Array<{
+    agentId: string;
+    projectId?: string;
+    mode: V2Mode;
+    previousMode?: V2Mode;
+    previousSource?: string;
+    updatedAt: string;
+    updatedBy: string;
+    reason?: string;
+  }>;
+}
+
 export type Page =
   | "overview"
   | "memory"

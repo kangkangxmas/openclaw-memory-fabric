@@ -36,6 +36,7 @@ import { FederationService } from "./services/federation-service.js";
 import { runGarbageCollection } from "./services/lifecycle-service.js";
 import { EventLedgerService } from "./services/event-ledger-service.js";
 import { AtomicMemoryStore } from "./services/atomic-memory-store.js";
+import { V2RolloutConfigService } from "./services/v2-rollout-config-service.js";
 import type { ErrorResponse } from "./models/index.js";
 
 export async function buildServer() {
@@ -64,6 +65,7 @@ export async function buildServer() {
   const carriers = new CarrierRepository(cfg.carriers.root);
   const eventLedger = new EventLedgerService(cfg.openviking);
   const atomicStore = new AtomicMemoryStore(cfg.openviking);
+  const rolloutConfig = new V2RolloutConfigService(cfg.openviking);
   // Optional LLM refinement for distill — configure via env vars
   const llmCfg: DistillLLMConfig | undefined =
     process.env.DISTILL_LLM_BASE_URL && process.env.DISTILL_LLM_MODEL
@@ -130,7 +132,7 @@ export async function buildServer() {
 
   registerHealthRoute(app, cfg);
   registerRecallRoute(app, openviking, shared, patStore);
-  registerCommitRoute(app, openviking, expService, eventLedger, atomicStore);
+  registerCommitRoute(app, openviking, expService, eventLedger, atomicStore, rolloutConfig);
   registerCarrierRoutes(app, carriers);
   registerDistillRoute(app, distill);
   registerBootstrapRoute(app, graphify);
@@ -147,7 +149,7 @@ export async function buildServer() {
   registerFederationRoutes(app, federation);
 
   // Phase 3: V2 API routes
-  registerV2Routes(app, cfg.openviking, carriers, vectorService);
+  registerV2Routes(app, cfg.openviking, carriers, vectorService, rolloutConfig);
 
   // D4: Garbage collection endpoint
   app.post("/lifecycle/gc", async () => {

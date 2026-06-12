@@ -245,12 +245,66 @@ Query:
 
 Response 包含：
 
-- `mode`：当前 `agentId` 的有效 v2 模式。默认来自 `MEMORY_FABRIC_V2_MODE`，可被 per-Agent allowlist 覆盖。
+- `mode`：当前 `agentId` / `projectId` 的有效 v2 模式。解析顺序为：`MEMORY_FABRIC_V2_OFF_AGENT_IDS` 紧急关闭 > Inspector runtime override > 环境 allowlist > `MEMORY_FABRIC_V2_MODE`。
 - `worker`：ConsolidationWorker 状态
 - `candidateStats`：candidate queue 总量、状态和类型分布
 - `recallAudit`：最近 audit 数量、最近时间、v2 cards/evidence/rendered chars 与 legacy sources/brief chars 均值
 - `bench`：最新 Bench report，可能为 `null`
 - `readiness`：`modeReady`、`sourceCoverageReady`、`latencyReady`、`candidateQueueHealthy`
+
+### GET /v2/rollout/effective
+
+返回某个 Agent/Project 的有效 v2 灰度模式。plugin 的 `before_prompt_build` 会优先读取该接口，失败时才回退本地环境变量。
+
+Query:
+
+- `agentId` 必填语义字段，缺省时按 `development`
+- `projectId` 可选
+
+Response 包含：
+
+- `mode`：`off`、`shadow`、`v2-recall`、`v2-write`
+- `source`：`runtime_override`、`env_global`、`env_agent_write`、`env_agent_recall`、`env_agent_shadow`、`env_agent_off`
+- `baseMode` / `baseSource`：不考虑 runtime override 时的环境基线
+- `canRollback`：是否存在 Inspector 可回滚的 runtime override
+
+### GET /v2/rollout/modes
+
+返回多 Agent 灰度面板数据。接口会合并请求传入的 Agent、runtime overrides、candidate queue 和 recall audit 中出现过的 Agent/Project。
+
+Query:
+
+- `agentIds` 可选，逗号分隔
+- `agentId` / `projectId` 可选，用于把当前 Inspector 选择固定加入结果
+
+Response 包含：
+
+- `defaultMode`：全局环境默认模式
+- `modes[]`：每个 Agent/Project 的有效模式、来源、候选队列、recall audit 和 worker 命中状态
+- `overrides[]`：当前持久化 runtime override 列表
+
+### POST /v2/rollout/modes
+
+为单个 Agent/Project 写入 runtime override。该配置会持久化在 v2 rollout 配置文件中，并记录 history。
+
+Body:
+
+- `agentId` 必填
+- `projectId` 可选
+- `mode` 必填：`off`、`shadow`、`v2-recall`、`v2-write`
+- `updatedBy` 可选，Inspector 默认 `inspector`
+- `reason` 可选
+
+### POST /v2/rollout/modes/rollback
+
+回滚某个 Agent/Project 的上一次 runtime override。若上一次来源是环境变量，则删除 runtime override，恢复环境基线。
+
+Body:
+
+- `agentId` 必填
+- `projectId` 可选
+- `updatedBy` 可选
+- `reason` 可选
 
 ### GET /v2/canary/status
 

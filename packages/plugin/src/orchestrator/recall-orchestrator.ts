@@ -48,8 +48,15 @@ function detectScope(ctx: RecallContext, cfg: MemoryFabricConfig): MemoryScope {
 
 type MarkerFn = (msg: string) => boolean;
 
-function v2RecallEnabled(): boolean {
-  return process.env.MEMORY_FABRIC_V2_MODE === "v2-recall" || process.env.MEMORY_FABRIC_V2_MODE === "v2-write";
+type V2Mode = "off" | "shadow" | "v2-recall" | "v2-write";
+
+function parseLocalV2Mode(): V2Mode {
+  const raw = process.env.MEMORY_FABRIC_V2_MODE;
+  return raw === "off" || raw === "shadow" || raw === "v2-recall" || raw === "v2-write" ? raw : "shadow";
+}
+
+function v2RecallEnabled(mode: V2Mode): boolean {
+  return mode === "v2-recall" || mode === "v2-write";
 }
 
 function preview(text: string, limit = 240): string {
@@ -164,8 +171,15 @@ export class RecallOrchestrator {
    */
   async execute(ctx: RecallContext): Promise<MemoryBriefResult> {
     const recallPlan = this.plan(ctx);
+    let v2Mode = parseLocalV2Mode();
 
-    if (v2RecallEnabled() && recallPlan.query.trim().length > 0) {
+    try {
+      v2Mode = (await this.client.v2RolloutEffective(ctx.agentId, ctx.projectId)).mode;
+    } catch {
+      // Dynamic rollout config is optional. Fall back to the local env mode.
+    }
+
+    if (v2RecallEnabled(v2Mode) && recallPlan.query.trim().length > 0) {
       try {
         const v2 = await this.client.recallPlan({
           agentId: ctx.agentId,
@@ -233,7 +247,7 @@ export class RecallOrchestrator {
             agentId: ctx.agentId,
             projectId: ctx.projectId,
             query: recallPlan.query,
-            mode: process.env.MEMORY_FABRIC_V2_MODE ?? "off",
+            mode: v2Mode,
             legacy: legacyForAudit,
             v2: {
               intent: v2.plan.intent,

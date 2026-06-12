@@ -12,8 +12,11 @@ import type {
   V2CandidateStats,
   V2ConsolidationStatus,
   V2GrayStatus,
+  V2Mode,
   V2RecallAuditEntry,
   V2RecallPlanResponse,
+  V2RolloutModeRow,
+  V2RolloutModesResponse,
   V2TraceResponse,
 } from "../types";
 import { api } from "../api/client";
@@ -35,6 +38,7 @@ type TraceRecord = Record<string, unknown>;
 
 const candidateFilters: CandidateFilter[] = ["all", "pending", "needs_review", "rejected", "promoted"];
 const candidateSorts: CandidateSort[] = ["updated_desc", "confidence_asc", "source_refs_asc"];
+const rolloutModes: V2Mode[] = ["off", "shadow", "v2-recall", "v2-write"];
 
 function pct(value: number): string {
   return `${Math.round(value * 100)}%`;
@@ -76,6 +80,10 @@ function jsonPreview(value: unknown, limit = 240): string {
   } catch {
     return String(value);
   }
+}
+
+function rolloutKey(row: Pick<V2RolloutModeRow, "agentId" | "projectId">): string {
+  return `${row.agentId}::${row.projectId ?? ""}`;
 }
 
 function statusBadgeClass(status: "pass" | "warn" | "fail" | "ready" | string): string {
@@ -124,6 +132,8 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const [gray, setGray] = useState<V2GrayStatus | null>(null);
   const [canary, setCanary] = useState<V2CanaryStatus | null>(null);
   const [recallAudit, setRecallAudit] = useState<V2RecallAuditEntry[]>([]);
+  const [rollout, setRollout] = useState<V2RolloutModesResponse | null>(null);
+  const [modeDrafts, setModeDrafts] = useState<Record<string, V2Mode>>({});
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -170,13 +180,14 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const loadOps = async () => {
     const agentId = ctx.agentId || undefined;
     const projectId = ctx.projectId || undefined;
-    const [candidateRes, statusRes, grayRes, fixtureRes, auditRes, canaryRes] = await Promise.all([
+    const [candidateRes, statusRes, grayRes, fixtureRes, auditRes, canaryRes, rolloutRes] = await Promise.all([
       api.getV2Candidates(agentId, projectId),
       api.getV2ConsolidationStatus(agentId, projectId),
       api.getV2GrayStatus(agentId, projectId),
       api.getV2BenchFixtures(),
       api.getV2RecallAudit(agentId, projectId, 12),
       api.getV2CanaryStatus({ agentId: CANARY_AGENT_ID, projectId: CANARY_PROJECT_ID, expectedMode: CANARY_EXPECTED_MODE }),
+      api.getV2RolloutModes({ agentIds: ctx.agents, agentId, projectId }),
     ]);
     setCandidates(candidateRes.candidates);
     setCandidateStats(statusRes.candidateStats);
@@ -185,6 +196,15 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setFixtures(fixtureRes);
     setRecallAudit(auditRes.entries);
     setCanary(canaryRes);
+    setRollout(rolloutRes);
+    setModeDrafts((prev) => {
+      const next = { ...prev };
+      for (const row of rolloutRes.modes) {
+        const key = rolloutKey(row);
+        if (!next[key]) next[key] = row.mode;
+      }
+      return next;
+    });
     if (grayRes.bench) setBench(grayRes.bench);
     if (canaryRes.bench) setBench(canaryRes.bench);
   };
@@ -221,6 +241,40 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     if (!window.confirm(t("v2.confirm.stopWorker"))) return;
     const res = await api.stopV2ConsolidationWorker();
     setWorker(res.status);
+    await loadOps();
+  };
+
+  const startWorkerFor = async (row: V2RolloutModeRow) => {
+    if (!window.confirm(`${t("v2.confirm.startWorkerFor")}\n${row.agentId} / ${row.projectId || "*"}`)) return;
+    const res = await api.startV2ConsolidationWorker(row.agentId, row.projectId);
+    setWorker(res.status);
+    await loadOps();
+  };
+
+  const setRolloutDraft = (row: V2RolloutModeRow, mode: V2Mode) => {
+    setModeDrafts((prev) => ({ ...prev, [rolloutKey(row)]: mode }));
+  };
+
+  const applyRolloutMode = async (row: V2RolloutModeRow) => {
+    const mode = modeDrafts[rolloutKey(row)] ?? row.mode;
+    if (mode === row.mode) return;
+    if (!window.confirm(`${t("v2.confirm.setMode")}\n${row.agentId} / ${row.projectId || "*"}: ${row.mode} -> ${mode}`)) return;
+    await api.setV2RolloutMode({
+      agentId: row.agentId,
+      projectId: row.projectId,
+      mode,
+      reason: "inspector rollout change",
+    });
+    await loadOps();
+  };
+
+  const rollbackRolloutMode = async (row: V2RolloutModeRow) => {
+    if (!window.confirm(`${t("v2.confirm.rollbackMode")}\n${row.agentId} / ${row.projectId || "*"}`)) return;
+    await api.rollbackV2RolloutMode({
+      agentId: row.agentId,
+      projectId: row.projectId,
+      reason: "inspector rollback",
+    });
     await loadOps();
   };
 
@@ -347,6 +401,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const canaryContext = `${CANARY_AGENT_ID} / ${CANARY_PROJECT_ID}`;
   const workerContext = `${worker?.agentId ?? "-"} / ${worker?.projectId ?? "-"}`;
   const selectedDiffersFromCanary = !!ctx.agentId && (ctx.agentId !== CANARY_AGENT_ID || (ctx.projectId || "") !== CANARY_PROJECT_ID);
+  const rolloutRows = rollout?.modes ?? [];
 
   return (
     <div className="space-y-5">
@@ -398,6 +453,122 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             {t("v2.context.mismatch")}
           </div>
         )}
+      </section>
+
+      <section className="rounded-lg border border-line bg-panel/85 shadow-card overflow-hidden">
+        <div className="border-b border-line px-4 py-3">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-bold text-ink">{t("v2.rollout.title")}</h2>
+                {rollout && <CompactBadge>{t("v2.rollout.default")}: {rollout.defaultMode}</CompactBadge>}
+              </div>
+              <div className="mt-1 text-xs text-muted">{t("v2.rollout.desc")}</div>
+            </div>
+            <button
+              onClick={() => void run("ops", loadOps)}
+              disabled={!!loading}
+              className="w-fit px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
+            >
+              {t("common.refresh")}
+            </button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-xs">
+            <thead className="bg-panel text-muted">
+              <tr className="border-b border-line">
+                <th className="px-4 py-2 text-left font-medium">{t("v2.rollout.scope")}</th>
+                <th className="px-4 py-2 text-left font-medium">{t("v2.rollout.mode")}</th>
+                <th className="px-4 py-2 text-left font-medium">{t("v2.rollout.source")}</th>
+                <th className="px-4 py-2 text-left font-medium">{t("v2.rollout.health")}</th>
+                <th className="px-4 py-2 text-left font-medium">{t("v2.rollout.updated")}</th>
+                <th className="px-4 py-2 text-right font-medium">{t("v2.rollout.actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rolloutRows.map((row) => {
+                const key = rolloutKey(row);
+                const draft = modeDrafts[key] ?? row.mode;
+                const changed = draft !== row.mode;
+                return (
+                  <tr key={key} className="border-b border-line/50 align-top">
+                    <td className="px-4 py-3">
+                      <div className="font-mono text-ink">{row.agentId}</div>
+                      <div className="mt-1 font-mono text-muted">{row.projectId || t("v2.rollout.allProjects")}</div>
+                      {row.workerActive && (
+                        <div className="mt-2">
+                          <CompactBadge status="pass">{t("v2.rollout.workerActive")}</CompactBadge>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CompactBadge status={row.mode}>{row.mode}</CompactBadge>
+                        <span className="text-muted">{t("v2.rollout.base")}: {row.baseMode}</span>
+                      </div>
+                      <select
+                        value={draft}
+                        onChange={(event) => setRolloutDraft(row, event.target.value as V2Mode)}
+                        className="mt-2 rounded-lg border border-line bg-deep px-2 py-1.5 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+                      >
+                        {rolloutModes.map((mode) => (
+                          <option key={mode} value={mode}>{mode}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div>
+                        <CompactBadge status={row.source === "runtime_override" ? "warn" : "default"}>{row.source}</CompactBadge>
+                      </div>
+                      <div className="mt-2 text-muted">{row.baseSource}</div>
+                      {row.reason && <div className="mt-1 max-w-[180px] text-muted">{clip(row.reason, 80)}</div>}
+                    </td>
+                    <td className="px-4 py-3 text-muted">
+                      <div>{row.candidateStats.byStatus.pending} pending · {row.candidateStats.byStatus.needs_review} review</div>
+                      <div className="mt-1">{row.recallAudit.count} audits</div>
+                      {row.recallAudit.lastAt && <div className="mt-1">{formatTime(row.recallAudit.lastAt)}</div>}
+                    </td>
+                    <td className="px-4 py-3 text-muted">
+                      <div>{formatTime(row.updatedAt)}</div>
+                      <div className="mt-1">{row.updatedBy || "-"}</div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => void run(`rollout-set-${key}`, () => applyRolloutMode(row))}
+                        disabled={!!loading || !changed}
+                        className="mr-2 px-2 py-1 bg-accent text-white rounded text-xs disabled:opacity-40"
+                      >
+                        {t("v2.rollout.apply")}
+                      </button>
+                      <button
+                        onClick={() => void run(`rollout-rollback-${key}`, () => rollbackRolloutMode(row))}
+                        disabled={!!loading || !row.canRollback}
+                        className="mr-2 px-2 py-1 border border-line rounded text-xs text-ink disabled:opacity-40"
+                      >
+                        {t("v2.rollout.rollback")}
+                      </button>
+                      <button
+                        onClick={() => void run(`rollout-worker-${key}`, () => startWorkerFor(row))}
+                        disabled={!!loading}
+                        className="px-2 py-1 border border-line rounded text-xs text-ink disabled:opacity-40"
+                      >
+                        {t("v2.rollout.worker")}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {rolloutRows.length === 0 && (
+                <tr>
+                  <td className="px-4 py-8 text-center text-sm text-muted" colSpan={6}>
+                    {t("common.empty")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">

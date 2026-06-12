@@ -74,6 +74,18 @@ export interface RecallAuditRequest {
   };
 }
 
+export type V2Mode = "off" | "shadow" | "v2-recall" | "v2-write";
+
+export interface V2RolloutEffectiveResponse {
+  ok: boolean;
+  agentId: string;
+  projectId?: string;
+  mode: V2Mode;
+  source: string;
+  baseMode: V2Mode;
+  baseSource: string;
+}
+
 export interface CommitRequest {
   agentId: string;
   projectId?: string;
@@ -292,6 +304,12 @@ export class SidecarClient {
 
   async recallAudit(req: RecallAuditRequest): Promise<{ ok: boolean }> {
     return this.request<{ ok: boolean }>("POST", "/v2/recall/audit", req);
+  }
+
+  async v2RolloutEffective(agentId: string, projectId?: string): Promise<V2RolloutEffectiveResponse> {
+    const qs = new URLSearchParams({ agentId });
+    if (projectId) qs.set("projectId", projectId);
+    return this.request<V2RolloutEffectiveResponse>("GET", `/v2/rollout/effective?${qs.toString()}`);
   }
 
   async commit(req: CommitRequest): Promise<CommitResponse> {

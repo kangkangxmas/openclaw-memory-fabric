@@ -20,8 +20,9 @@ import { MemoryBenchRunner, type MemoryBenchCase, type MemoryBenchRunOptions } f
 import { MemoryBenchFixtureSeeder } from "../services/memory-bench-fixture-seeder.js";
 import { V2RelationGraphService, type V2RelationType } from "../services/v2-relation-graph-service.js";
 import { RecallAuditLogService } from "../services/recall-audit-log-service.js";
+import { V2RolloutConfigService } from "../services/v2-rollout-config-service.js";
 import type { CarrierRepository } from "../services/carrier-service.js";
-import { isV2RecallReady, resolveV2Mode } from "../utils/v2-mode.js";
+import { isV2RecallReady, parseV2Mode, resolveV2ModeFromEnv, type V2Mode } from "../utils/v2-mode.js";
 
 // ---------------------------------------------------------------------------
 // Route Registration
@@ -31,7 +32,8 @@ export function registerV2Routes(
   app: FastifyInstance,
   cfg: SidecarConfig["openviking"],
   carriers?: CarrierRepository,
-  vectorService?: VectorService
+  vectorService?: VectorService,
+  rolloutConfig = new V2RolloutConfigService(cfg)
 ): void {
   const facade = new V2ServiceFacade({
     sidecarConfig: cfg,
@@ -67,6 +69,7 @@ export function registerV2Routes(
   ];
   const candidateStatuses: AtomicMemoryCandidate["status"][] = ["pending", "needs_review", "rejected", "promoted"];
   const relationTypes: V2RelationType[] = ["DECIDES", "IMPLEMENTS", "SUPERSEDES", "CAUSES", "VALIDATES", "CONSTRAINS"];
+  const rolloutModes: V2Mode[] = ["off", "shadow", "v2-recall", "v2-write"];
   const parseStatuses = (value?: string): AtomicMemoryCandidate["status"][] | undefined =>
     value
       ?.split(",")
@@ -78,6 +81,62 @@ export function registerV2Routes(
     return Number.isFinite(parsed) ? parsed : undefined;
   };
   const parseNumberWithDefault = (value: string | undefined, fallback: number): number => parseOptionalNumber(value) ?? fallback;
+  const splitList = (value?: string): string[] =>
+    (value ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  const scopeKey = (agentId: string, projectId?: string): string => `${agentId}::${projectId ?? ""}`;
+  const addScope = (scopes: Map<string, { agentId: string; projectId?: string }>, agentId?: string, projectId?: string): void => {
+    if (!agentId) return;
+    scopes.set(scopeKey(agentId, projectId), { agentId, projectId });
+  };
+  const collectRolloutScopes = async (opts: { agentIds?: string; projectIds?: string; agentId?: string; projectId?: string }) => {
+    const scopes = new Map<string, { agentId: string; projectId?: string }>();
+    const requestedAgents = splitList(opts.agentIds);
+    const requestedProjects = splitList(opts.projectIds);
+
+    addScope(scopes, opts.agentId, opts.projectId);
+    for (const agentId of requestedAgents) {
+      if (requestedProjects.length > 0) {
+        for (const projectId of requestedProjects) addScope(scopes, agentId, projectId);
+      } else {
+        addScope(scopes, agentId);
+      }
+    }
+
+    for (const override of await rolloutConfig.listOverrides()) {
+      addScope(scopes, override.agentId, override.projectId);
+    }
+
+    const [candidates, auditEntries] = await Promise.all([
+      atomicStore.listAll({ limit: 10_000 }),
+      recallAudit.list({ limit: 10_000 }),
+    ]);
+    for (const candidate of candidates) addScope(scopes, candidate.agentId, candidate.projectId);
+    for (const entry of auditEntries) addScope(scopes, entry.agentId, entry.projectId);
+
+    return [...scopes.values()].sort((a, b) => a.agentId.localeCompare(b.agentId) || (a.projectId ?? "").localeCompare(b.projectId ?? ""));
+  };
+  const buildRolloutRows = async (scopes: Array<{ agentId: string; projectId?: string }>) => {
+    const worker = consolidationWorker.status();
+    return Promise.all(scopes.map(async (scope) => {
+      const [effective, candidateStats, audits] = await Promise.all([
+        rolloutConfig.resolveMode(scope.agentId, scope.projectId),
+        atomicStore.stats({ agentId: scope.agentId, projectId: scope.projectId, limit: 10_000 }),
+        recallAudit.list({ agentId: scope.agentId, projectId: scope.projectId, limit: 50 }),
+      ]);
+      return {
+        ...effective,
+        candidateStats,
+        recallAudit: {
+          count: audits.length,
+          lastAt: audits[0]?.createdAt,
+        },
+        workerActive: worker.running && worker.agentId === scope.agentId && worker.projectId === scope.projectId,
+      };
+    }));
+  };
   const shouldAutoStartWorker = (): boolean => {
     const raw = process.env.MEMORY_FABRIC_CONSOLIDATION_WORKER?.toLowerCase();
     return raw === "auto" || raw === "on" || raw === "true" || raw === "1";
@@ -633,6 +692,89 @@ export function registerV2Routes(
 
   app.get<{
     Querystring: { agentId?: string; projectId?: string };
+  }>("/v2/rollout/effective", async (request) => {
+    const agentId = request.query.agentId ?? "development";
+    const effective = await rolloutConfig.resolveMode(agentId, request.query.projectId);
+    return { ok: true, ...effective };
+  });
+
+  app.get<{
+    Querystring: { agentIds?: string; projectIds?: string; agentId?: string; projectId?: string };
+  }>("/v2/rollout/modes", async (request) => {
+    const scopes = await collectRolloutScopes(request.query);
+    const rows = await buildRolloutRows(scopes.length > 0 ? scopes : [{ agentId: "development" }]);
+    const overrides = await rolloutConfig.listOverrides();
+    return {
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      defaultMode: resolveV2ModeFromEnv(undefined).mode,
+      modes: rows,
+      overrides,
+    };
+  });
+
+  app.post<{
+    Body: { agentId: string; projectId?: string; mode: string; updatedBy?: string; reason?: string };
+  }>(
+    "/v2/rollout/modes",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["agentId", "mode"],
+          properties: {
+            agentId: { type: "string", minLength: 1 },
+            projectId: { type: "string" },
+            mode: { type: "string", enum: rolloutModes },
+            updatedBy: { type: "string" },
+            reason: { type: "string" },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const effective = await rolloutConfig.setMode({
+        agentId: request.body.agentId,
+        projectId: request.body.projectId,
+        mode: parseV2Mode(request.body.mode),
+        updatedBy: request.body.updatedBy ?? "inspector",
+        reason: request.body.reason,
+      });
+      return { ok: true, effective };
+    }
+  );
+
+  app.post<{
+    Body: { agentId: string; projectId?: string; updatedBy?: string; reason?: string };
+  }>(
+    "/v2/rollout/modes/rollback",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["agentId"],
+          properties: {
+            agentId: { type: "string", minLength: 1 },
+            projectId: { type: "string" },
+            updatedBy: { type: "string" },
+            reason: { type: "string" },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const effective = await rolloutConfig.rollback({
+        agentId: request.body.agentId,
+        projectId: request.body.projectId,
+        updatedBy: request.body.updatedBy ?? "inspector",
+        reason: request.body.reason,
+      });
+      return { ok: true, effective };
+    }
+  );
+
+  app.get<{
+    Querystring: { agentId?: string; projectId?: string };
   }>("/v2/gray/status", async (request) => {
     const agentId = request.query.agentId ?? "development";
     const projectId = request.query.projectId;
@@ -647,7 +789,7 @@ export function registerV2Routes(
     const legacySourceCounts = auditEntries.map((entry) => entry.legacy?.sourceCount ?? 0);
     const legacyBriefChars = auditEntries.map((entry) => entry.legacy?.memoryBriefChars ?? 0);
     const avg = (values: number[]): number => values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-    const mode = resolveV2Mode(agentId);
+    const mode = (await rolloutConfig.resolveMode(agentId, projectId)).mode;
 
     return {
       ok: true,
@@ -690,7 +832,7 @@ export function registerV2Routes(
   }>("/v2/canary/status", async (request) => {
     const agentId = request.query.agentId ?? "product";
     const projectId = request.query.projectId ?? "Product";
-    const mode = resolveV2Mode(agentId);
+    const mode = (await rolloutConfig.resolveMode(agentId, projectId)).mode;
     const expectedMode = request.query.expectedMode;
     const maxPending = parseNumberWithDefault(request.query.maxPending, 25);
     const maxNeedsReview = parseNumberWithDefault(request.query.maxNeedsReview, 10);

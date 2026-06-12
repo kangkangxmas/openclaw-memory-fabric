@@ -5,6 +5,7 @@ import type { OpenVikingService } from "../services/openviking-service.js";
 import type { ExperienceService, PostCommitContext } from "../services/experience-service.js";
 import type { EventLedgerService } from "../services/event-ledger-service.js";
 import type { AtomicMemoryCandidate, AtomicMemoryStore } from "../services/atomic-memory-store.js";
+import type { V2RolloutConfigService } from "../services/v2-rollout-config-service.js";
 import type { MemoryType } from "../models/schema-v2.js";
 import { resolveV2Mode } from "../utils/v2-mode.js";
 
@@ -85,7 +86,8 @@ export function registerCommitRoute(
   openviking: OpenVikingService,
   experience?: ExperienceService,
   eventLedger?: EventLedgerService,
-  atomicStore?: AtomicMemoryStore
+  atomicStore?: AtomicMemoryStore,
+  rolloutConfig?: V2RolloutConfigService
 ): void {
   app.post<{ Body: CommitRequest }>(
     "/commit",
@@ -108,7 +110,9 @@ export function registerCommitRoute(
       }
     },
     async (request): Promise<CommitResponse> => {
-      const mode = resolveV2Mode(request.body.agentId);
+      const mode = rolloutConfig
+        ? (await rolloutConfig.resolveMode(request.body.agentId, request.body.projectId)).mode
+        : resolveV2Mode(request.body.agentId);
       const v2ServicesReady = !!eventLedger && !!atomicStore;
       let v2: CommitResponse["v2"] =
         mode === "off"

@@ -407,9 +407,9 @@ export function register(api: {
       typeof (event as { prompt?: unknown } | undefined)?.prompt === "string"
         ? ((event as { prompt: string }).prompt.length)
         : 0;
-    const v2Mode = process.env.MEMORY_FABRIC_V2_MODE ?? "unset";
+    const envV2Mode = process.env.MEMORY_FABRIC_V2_MODE ?? "unset";
     api.logger?.info?.(
-      `[memory-fabric] before_prompt_build invoked agent=${agentId} workspace=${workspaceDir ?? "unknown"} promptChars=${promptChars} v2Mode=${v2Mode}`
+      `[memory-fabric] before_prompt_build invoked agent=${agentId} workspace=${workspaceDir ?? "unknown"} promptChars=${promptChars} envV2Mode=${envV2Mode}`
     );
     const result = await instance.hooks.before_prompt_build(
       event as Parameters<typeof instance.hooks.before_prompt_build>[0],

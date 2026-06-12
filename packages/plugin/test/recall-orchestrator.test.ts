@@ -252,6 +252,63 @@ describe("RecallOrchestrator.execute()", () => {
     }
   });
 
+  it("uses sidecar rollout mode before falling back to local environment mode", async () => {
+    const previousMode = process.env.MEMORY_FABRIC_V2_MODE;
+    process.env.MEMORY_FABRIC_V2_MODE = "shadow";
+    let recallPlanCalled = false;
+    const auditPayload: { current?: Record<string, unknown> } = {};
+    const client = makeClient({
+      v2RolloutEffective: async () => ({
+        ok: true,
+        agentId: "a1",
+        projectId: "p1",
+        mode: "v2-recall",
+        source: "runtime_override",
+        baseMode: "shadow",
+        baseSource: "env_global",
+      }),
+      recall: async () => ({ memoryBrief: "legacy", sources: ["legacy"], budgetUsed: 10 }),
+      recallPlan: async () => {
+        recallPlanCalled = true;
+        return {
+          ok: true,
+          plan: {
+            query: "rollout mode",
+            intent: "fact_confirmation",
+            reason: "test",
+          },
+          cards: [
+            {
+              memoryId: "mem-rollout",
+              type: "fact",
+              time: "2026-06-12T00:00:00.000Z",
+              confidence: 0.9,
+              content: "Runtime rollout mode enabled v2 recall.",
+              evidence: ["evt-rollout"],
+            },
+          ],
+          rendered: "Runtime rollout mode enabled v2 recall.",
+          executionTimeMs: 1,
+        };
+      },
+      recallAudit: async (req: Record<string, unknown>) => {
+        auditPayload.current = req;
+        return { ok: true };
+      },
+    });
+
+    try {
+      const orch = new RecallOrchestrator(client as never, baseConfig);
+      const result = await orch.execute({ agentId: "a1", projectId: "p1", latestMessage: "rollout mode" });
+      assert.equal(recallPlanCalled, true);
+      assert.equal((auditPayload.current as { mode?: string }).mode, "v2-recall");
+      assert.ok(result.sources.includes("v2:recall-plan:fact_confirmation"));
+    } finally {
+      if (previousMode === undefined) delete process.env.MEMORY_FABRIC_V2_MODE;
+      else process.env.MEMORY_FABRIC_V2_MODE = previousMode;
+    }
+  });
+
   it("requests extra carrier files for debug task type at l1", async () => {
     let capturedFiles: string[] = [];
     const client = makeClient({

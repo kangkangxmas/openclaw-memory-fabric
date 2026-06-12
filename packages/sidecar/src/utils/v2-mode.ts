@@ -1,4 +1,10 @@
 export type V2Mode = "off" | "shadow" | "v2-recall" | "v2-write";
+export type V2ModeSource =
+  | "env_global"
+  | "env_agent_off"
+  | "env_agent_shadow"
+  | "env_agent_recall"
+  | "env_agent_write";
 
 const modes: V2Mode[] = ["off", "shadow", "v2-recall", "v2-write"];
 
@@ -21,14 +27,18 @@ function includesAgent(raw: string | undefined, agentId: string | undefined): bo
 }
 
 export function resolveV2Mode(agentId?: string): V2Mode {
+  return resolveV2ModeFromEnv(agentId).mode;
+}
+
+export function resolveV2ModeFromEnv(agentId?: string): { mode: V2Mode; source: V2ModeSource } {
   const baseMode = parseV2Mode(process.env.MEMORY_FABRIC_V2_MODE);
 
-  if (includesAgent(process.env.MEMORY_FABRIC_V2_OFF_AGENT_IDS, agentId)) return "off";
-  if (includesAgent(process.env.MEMORY_FABRIC_V2_SHADOW_AGENT_IDS, agentId)) return "shadow";
-  if (includesAgent(process.env.MEMORY_FABRIC_V2_WRITE_AGENT_IDS, agentId)) return "v2-write";
-  if (includesAgent(process.env.MEMORY_FABRIC_V2_RECALL_AGENT_IDS, agentId)) return "v2-recall";
+  if (includesAgent(process.env.MEMORY_FABRIC_V2_OFF_AGENT_IDS, agentId)) return { mode: "off", source: "env_agent_off" };
+  if (includesAgent(process.env.MEMORY_FABRIC_V2_SHADOW_AGENT_IDS, agentId)) return { mode: "shadow", source: "env_agent_shadow" };
+  if (includesAgent(process.env.MEMORY_FABRIC_V2_WRITE_AGENT_IDS, agentId)) return { mode: "v2-write", source: "env_agent_write" };
+  if (includesAgent(process.env.MEMORY_FABRIC_V2_RECALL_AGENT_IDS, agentId)) return { mode: "v2-recall", source: "env_agent_recall" };
 
-  return baseMode;
+  return { mode: baseMode, source: "env_global" };
 }
 
 export function isV2RecallReady(mode: V2Mode): boolean {
