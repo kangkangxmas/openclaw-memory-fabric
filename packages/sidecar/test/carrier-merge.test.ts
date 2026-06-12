@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { CarrierRepository } from "../src/services/carrier-service.js";
 
 let tmpDir: string;
@@ -229,6 +229,65 @@ describe("CarrierRepository.merge() — conflict-preserve strategy", () => {
     );
     const occurrences = (content.match(/auth library/g) ?? []).length;
     assert.equal(occurrences, 1);
+  });
+
+  it("does not overwrite existing managed self-model blocks", async () => {
+    await repo.initAgent("agent-cp3");
+    const selfModelPath = join(tmpDir, "agents", "agent-cp3", "private", "self-model.md");
+    const existing = `# Self Model
+
+## Current Goal
+Validate v2-write canary.
+
+## Understood
+- SOUL.md says current model is deepseek-v4-pro.
+
+## Uncertain
+
+## Missing Evidence
+
+## Preferred Next Actions
+
+## Confidence
+medium
+
+## Updated At
+${new Date().toISOString()}
+<!-- memory-fabric:begin -->
+synced by sync-self-models.sh
+<!-- memory-fabric:end -->
+`;
+    const incoming = `# Self Model
+
+## Current Goal
+Validate v2-write canary.
+
+## Understood
+- Carrier says current model is openai/gpt-5.5.
+
+## Uncertain
+
+## Missing Evidence
+
+## Preferred Next Actions
+
+## Confidence
+medium
+
+## Updated At
+${new Date().toISOString()}
+`;
+    writeFileSync(selfModelPath, existing, "utf8");
+
+    await repo.merge({
+      agentId: "agent-cp3",
+      patches: [{ filename: "self-model.md", content: incoming }]
+    });
+
+    const content = readFileSync(selfModelPath, "utf8");
+    assert.ok(content.includes("deepseek-v4-pro"));
+    assert.ok(content.includes("openai/gpt-5.5"));
+    assert.notEqual(content.trim(), incoming.trim());
   });
 });
 

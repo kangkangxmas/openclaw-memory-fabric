@@ -495,10 +495,12 @@ export class CarrierRepository {
         // when existing is empty or stale (>7 days since last update).
         // Otherwise, append with a conflict marker if content seems different.
         const allowManagedOverwrite = def.filename === "self-model.md";
+        const hasManagedBlock =
+          allowManagedOverwrite && /<!--\s*memory-fabric:begin\b/.test(existing);
         const isTemplate =
           allowManagedOverwrite &&
+          !hasManagedBlock &&
           (existing.includes("<!-- What is the agent currently trying to accomplish? -->") ||
-            existing.includes("<!-- memory-fabric:begin -->") ||
             existing.length < 200 ||
             existing.includes("Not specified"));
 
@@ -513,7 +515,7 @@ export class CarrierRepository {
           }
         }
 
-        if (allowManagedOverwrite && (isTemplate || isStale)) {
+        if (allowManagedOverwrite && !hasManagedBlock && (isTemplate || isStale)) {
           // Safe overwrite: existing is unmodified template or >7 days old
           if (incoming.trim().length > 0) {
             await writeFile(filePath, incoming, "utf8");
@@ -521,7 +523,9 @@ export class CarrierRepository {
         } else {
           // Append with a conflict marker if content seems different from existing
           const normalized = incoming.trim();
-          const alreadyPresent = existing.includes(normalized.slice(0, 40));
+          const alreadyPresent = allowManagedOverwrite
+            ? existing.includes(normalized)
+            : existing.includes(normalized.slice(0, 40));
           if (!alreadyPresent && isUsefulAppendLine(normalized)) {
             const ts = new Date().toISOString().slice(0, 10);
             const line = `- [ ] ${normalized} (added: ${ts})\n`;
