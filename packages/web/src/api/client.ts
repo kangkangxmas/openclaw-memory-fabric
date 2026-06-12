@@ -37,7 +37,12 @@ import type {
   V2RolloutModesResponse,
 } from "../types";
 
-const BASE = "";
+function resolveApiBase(): string {
+  if (typeof window === "undefined") return "";
+  return window.location.pathname.startsWith("/memory-fabric/") ? "/memory-fabric" : "";
+}
+
+const BASE = resolveApiBase();
 
 async function post<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {

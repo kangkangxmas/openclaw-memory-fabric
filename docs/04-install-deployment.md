@@ -670,8 +670,9 @@ curl http://127.0.0.1:7811/health
 - [ ] Graphify 安装完成
 - [ ] 插件安装并启用
 - [ ] Skills 已发现 (4 个内置 + auto-generated 目录)
-- [ ] Sidecar 正常 (/health 返回 ok:true)
-- [ ] Inspector Web UI 可访问 (http://127.0.0.1:7811/inspect)
+- [ ] Sidecar 正常 (本机 /health 返回 ok:true)
+- [ ] Inspector Web UI 可访问 (本机 http://127.0.0.1:7811/inspect；共享 Nginx http://172.16.41.35/memory-fabric/inspect/)
+- [ ] 共享主机部署时 sidecar 仅监听 127.0.0.1，Nginx 使用 /memory-fabric/ 前缀转发，避免占用 /health、/v2 等根路径
 
 ### 核心功能
 - [ ] 示例项目已 bootstrap
