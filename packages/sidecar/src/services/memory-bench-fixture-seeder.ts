@@ -9,6 +9,7 @@ import { DEFAULT_MEMORY_BENCH_CASES, type MemoryBenchCase } from "./memory-bench
 export interface MemoryBenchSeedResult {
   agentId: string;
   projectId?: string;
+  scopes?: Array<{ agentId: string; projectId?: string; requested: number; createdCandidates: number; promoted: number }>;
   requested: number;
   skippedExisting: number;
   createdEvents: number;
@@ -53,15 +54,22 @@ export class MemoryBenchFixtureSeeder {
   ) {}
 
   async seed(opts: MemoryBenchSeedOptions = {}): Promise<MemoryBenchSeedResult> {
-    const agentId = opts.agentId ?? "development";
-    const projectId = opts.projectId ?? "openclaw-memory-fabric";
     const cases = (opts.cases ?? DEFAULT_MEMORY_BENCH_CASES).slice(0, Math.max(1, Math.min(opts.limit ?? 50, 100)));
     const memoryIds: string[] = [];
     let skippedExisting = 0;
     let createdEvents = 0;
     let createdCandidates = 0;
+    const scopeStats = new Map<string, { agentId: string; projectId?: string; requested: number; createdCandidates: number }>();
+    const createdByScope = new Map<string, { agentId: string; projectId?: string; count: number }>();
 
     for (const benchCase of cases) {
+      const agentId = opts.agentId ?? benchCase.agentId ?? "development";
+      const projectId = opts.projectId ?? benchCase.projectId ?? "openclaw-memory-fabric";
+      const key = scopeKey(agentId, projectId);
+      const stats = scopeStats.get(key) ?? { agentId, projectId, requested: 0, createdCandidates: 0 };
+      stats.requested++;
+      scopeStats.set(key, stats);
+
       const existing = await this.findExisting(agentId, projectId, benchCase);
       if (existing) {
         skippedExisting++;
@@ -97,26 +105,48 @@ export class MemoryBenchFixtureSeeder {
         tags: ["bench_fixture", fixtureTag(benchCase.id)],
       });
       createdCandidates++;
+      stats.createdCandidates++;
+      const created = createdByScope.get(key) ?? { agentId, projectId, count: 0 };
+      created.count++;
+      createdByScope.set(key, created);
     }
 
-    const consolidated = await this.consolidator.run({
-      agentId,
-      projectId,
-      statuses: ["pending"],
-      limit: Math.max(createdCandidates, 1),
-    });
-    memoryIds.push(...consolidated.entries.map((entry) => entry.memoryId).filter((id): id is string => !!id));
+    const consolidatedScopes: MemoryBenchSeedResult["scopes"] = [];
+    let promoted = 0;
+    let needsReview = 0;
+    let rejected = 0;
+    for (const scope of createdByScope.values()) {
+      const consolidated = await this.consolidator.run({
+        agentId: scope.agentId,
+        projectId: scope.projectId,
+        statuses: ["pending"],
+        limit: Math.max(scope.count, 1),
+      });
+      memoryIds.push(...consolidated.entries.map((entry) => entry.memoryId).filter((id): id is string => !!id));
+      promoted += consolidated.promoted;
+      needsReview += consolidated.needsReview;
+      rejected += consolidated.rejected;
+      const stats = scopeStats.get(scopeKey(scope.agentId, scope.projectId));
+      consolidatedScopes.push({
+        agentId: scope.agentId,
+        projectId: scope.projectId,
+        requested: stats?.requested ?? scope.count,
+        createdCandidates: stats?.createdCandidates ?? scope.count,
+        promoted: consolidated.promoted,
+      });
+    }
 
     return {
-      agentId,
-      projectId,
+      agentId: opts.agentId ?? (scopeStats.size === 1 ? [...scopeStats.values()][0]?.agentId : "mixed"),
+      projectId: opts.projectId ?? (scopeStats.size === 1 ? [...scopeStats.values()][0]?.projectId : undefined),
+      scopes: consolidatedScopes.length > 0 ? consolidatedScopes : [...scopeStats.values()].map((scope) => ({ ...scope, promoted: 0 })),
       requested: cases.length,
       skippedExisting,
       createdEvents,
       createdCandidates,
-      promoted: consolidated.promoted,
-      needsReview: consolidated.needsReview,
-      rejected: consolidated.rejected,
+      promoted,
+      needsReview,
+      rejected,
       memoryIds: [...new Set(memoryIds)],
     };
   }
@@ -132,4 +162,8 @@ export class MemoryBenchFixtureSeeder {
     });
     return result.entries[0] ?? null;
   }
+}
+
+function scopeKey(agentId: string, projectId: string | undefined): string {
+  return `${agentId}::${projectId ?? ""}`;
 }

@@ -419,11 +419,9 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setBenchStatus(await api.getV2BenchStatus());
   };
 
-  const loadFixtureBench = async () => {
+  const loadAcceptanceBench = async () => {
     if (!window.confirm(t("v2.confirm.runFixtureBench"))) return;
     const res = await api.postV2BenchRun({
-      agentId: ctx.agentId || undefined,
-      projectId: ctx.projectId || undefined,
       useFixtures: true,
       limit: 50,
       caseTimeoutMs: 5000,
@@ -442,7 +440,9 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
 
   const seedBench = async (useFixtures = false) => {
     if (!window.confirm(t(useFixtures ? "v2.confirm.seedFixtures" : "v2.confirm.seedBench"))) return;
-    const res = await api.postV2BenchSeed(ctx.agentId || undefined, ctx.projectId || undefined, useFixtures);
+    const res = useFixtures
+      ? await api.postV2BenchSeed(undefined, undefined, true)
+      : await api.postV2BenchSeed(ctx.agentId || undefined, ctx.projectId || undefined, false);
     setSeed(res.result);
     await loadOps();
   };
@@ -1479,14 +1479,14 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   disabled={!!loading || benchRunning}
                   className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs disabled:opacity-50"
                 >
-                  Run Bench
+                  {t("v2.bench.diagnostic")}
                 </button>
                 <button
-                  onClick={() => void run("bench-fixtures", loadFixtureBench)}
+                  onClick={() => void run("bench-fixtures", loadAcceptanceBench)}
                   disabled={!!loading || benchRunning}
                   className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
                 >
-                  Fixture Bench
+                  {t("v2.bench.acceptance")}
                 </button>
                 <button
                   onClick={() => void run("bench-seed", () => seedBench())}
@@ -1500,7 +1500,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   disabled={!!loading}
                   className="px-3 py-1.5 border border-amber-400/40 rounded-lg text-xs text-amber-200 disabled:opacity-50"
                 >
-                  Seed Fixtures
+                  {t("v2.bench.seedAcceptance")}
                 </button>
               </div>
               {seed && (

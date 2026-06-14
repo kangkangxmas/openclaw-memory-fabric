@@ -412,6 +412,13 @@ export interface V2BenchFixtureSet {
 export interface V2BenchSeedResult {
   agentId: string;
   projectId?: string;
+  scopes?: Array<{
+    agentId: string;
+    projectId?: string;
+    requested: number;
+    createdCandidates: number;
+    promoted: number;
+  }>;
   requested: number;
   skippedExisting: number;
   createdEvents: number;

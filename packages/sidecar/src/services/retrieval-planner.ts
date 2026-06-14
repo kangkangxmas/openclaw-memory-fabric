@@ -75,6 +75,10 @@ function lexicalRelevance(entry: MemoryEntryV2, query: string): number {
   return Math.min(1, score / Math.max(1, tokens.length * 0.7));
 }
 
+function hasEvidence(entry: MemoryEntryV2): boolean {
+  return (entry.sourceRefs?.length ?? 0) > 0 || (entry.sources?.length ?? 0) > 0;
+}
+
 export class RetrievalPlanner {
   private readonly packager = new MemoryCardPackager();
 
@@ -184,7 +188,9 @@ export class RetrievalPlanner {
       if (relationCount > 0) current.score += Math.min(0.2, relationCount * 0.04) * plan.weights.graph;
     }
 
-    const ranked = Array.from(scores.values()).sort((a, b) => b.score - a.score);
+    const ranked = Array.from(scores.values())
+      .filter((item) => hasEvidence(item.entry))
+      .sort((a, b) => b.score - a.score);
     const topLexical = ranked[0]?.lexical ?? 0;
     const focused =
       topLexical >= 0.35

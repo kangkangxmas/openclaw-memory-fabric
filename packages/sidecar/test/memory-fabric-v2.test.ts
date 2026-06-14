@@ -128,6 +128,14 @@ describe("Memory Fabric V2", () => {
       sourceRefs: [distractorEvent.eventId],
       confidence: 0.9,
     });
+    await core.create({
+      agentId: "development",
+      projectId: "openclaw",
+      scope: "project",
+      type: "decision",
+      content: "Memory Fabric v2 source-less legacy Hy-Memory memory should not become a v2 card.",
+      quality: { specificity: 1, actionability: 1, stability: 1, sourceCoverage: 0 },
+    });
 
     const consolidated = await consolidator.run({ agentId: "development", projectId: "openclaw" });
     const recall = await planner.recall({
@@ -140,8 +148,10 @@ describe("Memory Fabric V2", () => {
     expect(consolidated.promoted).toBe(2);
     expect(recall.plan.intent).toBe("decision_history");
     expect(recall.cards.length).toBeGreaterThan(0);
+    expect(recall.cards.every((card) => card.evidence.length > 0)).toBe(true);
     expect(recall.cards[0].evidence).toContain(event.eventId);
     expect(recall.cards[0].content).toContain("Hy-Memory");
+    expect(recall.cards.some((card) => card.content.includes("source-less legacy"))).toBe(false);
     expect(recall.cards.some((card) => card.evidence.includes(distractorEvent.eventId))).toBe(false);
     expect(recall.rendered).toContain("Memory Cards");
   });
@@ -851,6 +861,57 @@ describe("Memory Fabric V2", () => {
     const fixtureBenchBody = JSON.parse(fixtureBenchRes.body);
     expect(fixtureBenchBody.report.cases).toBe(1);
     expect(fixtureBenchBody.report.status).toBe("complete");
+
+    const saveMixedFixturesRes = await app.inject({
+      method: "POST",
+      url: "/v2/bench/fixtures",
+      payload: {
+        mode: "replace",
+        cases: [
+          {
+            id: "mixed-development-fixture",
+            agentId: "development",
+            projectId: "openclaw",
+            query: "mixed development fixture evidence",
+            expectedTerms: ["mixed", "development"],
+          },
+          {
+            id: "mixed-product-fixture",
+            agentId: "product",
+            projectId: "Product",
+            query: "mixed product fixture evidence",
+            expectedTerms: ["mixed", "product"],
+          },
+        ],
+      },
+    });
+    const saveMixedFixturesBody = JSON.parse(saveMixedFixturesRes.body);
+    expect(saveMixedFixturesBody.count).toBe(2);
+
+    const seedMixedFixturesRes = await app.inject({
+      method: "POST",
+      url: "/v2/bench/seed",
+      payload: {
+        useFixtures: true,
+        limit: 2,
+      },
+    });
+    const seedMixedFixturesBody = JSON.parse(seedMixedFixturesRes.body);
+    expect(seedMixedFixturesBody.result.agentId).toBe("mixed");
+    expect(seedMixedFixturesBody.result.scopes).toHaveLength(2);
+    expect(seedMixedFixturesBody.result.promoted).toBe(2);
+
+    const mixedFixtureBenchRes = await app.inject({
+      method: "POST",
+      url: "/v2/bench/run",
+      payload: {
+        useFixtures: true,
+        limit: 2,
+      },
+    });
+    const mixedFixtureBenchBody = JSON.parse(mixedFixtureBenchRes.body);
+    expect(mixedFixtureBenchBody.report.cases).toBe(2);
+    expect(mixedFixtureBenchBody.report.sourceCoverage).toBe(1);
 
     const grayStatusRes = await app.inject({
       method: "GET",

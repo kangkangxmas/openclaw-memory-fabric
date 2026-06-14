@@ -208,6 +208,7 @@ async function main() {
     projectId: opts.projectId,
     limit: opts.limit,
     useFixtures,
+    persist: useFixtures || Boolean(opts.fixtureFile),
   });
 
   const qs = new URLSearchParams({ agentId: opts.agentId, projectId: opts.projectId });
