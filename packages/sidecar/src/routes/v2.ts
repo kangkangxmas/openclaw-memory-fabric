@@ -21,6 +21,7 @@ import { MemoryBenchFixtureSeeder } from "../services/memory-bench-fixture-seede
 import { V2RelationGraphService, type V2RelationType } from "../services/v2-relation-graph-service.js";
 import { RecallAuditLogService } from "../services/recall-audit-log-service.js";
 import { V2RolloutConfigService } from "../services/v2-rollout-config-service.js";
+import { ContextHealthReporter } from "../services/context-health-reporter.js";
 import type { CarrierRepository } from "../services/carrier-service.js";
 import { isV2RecallReady, parseV2Mode, resolveV2ModeFromEnv, type V2Mode } from "../utils/v2-mode.js";
 
@@ -45,6 +46,7 @@ export function registerV2Routes(
   const atomicStore = new AtomicMemoryStore(cfg);
   const relationGraph = new V2RelationGraphService(cfg);
   const recallAudit = new RecallAuditLogService(cfg);
+  const contextHealth = new ContextHealthReporter();
   const consolidator = new MemoryConsolidator(cfg, atomicStore, relationGraph);
   const consolidationWorker = new ConsolidationWorker(atomicStore, consolidator);
   const retrievalPlanner = new RetrievalPlanner(core, relationGraph);
@@ -1069,6 +1071,11 @@ export function registerV2Routes(
       limit: Number(request.query.limit ?? 100),
     });
     return { ok: true, relations, count: relations.length };
+  });
+
+  app.get("/v2/context/health", async () => {
+    const report = await contextHealth.report();
+    return { ok: true, report };
   });
 
   // -------------------------------------------------------------------------

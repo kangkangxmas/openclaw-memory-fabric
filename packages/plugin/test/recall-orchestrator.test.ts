@@ -166,6 +166,42 @@ describe("RecallOrchestrator.execute()", () => {
     assert.ok(result.brief.includes("Structural Brief"));
   });
 
+  it("skips detailed graphBrief content when freshness is stale", async () => {
+    const client = makeClient({
+      graphBrief: async () => ({
+        freshness: "stale",
+        coreNodes: ["OldNode"],
+        communities: ["old-cluster"],
+        summary: "stale graph summary should not be injected"
+      })
+    });
+    const orch = new RecallOrchestrator(client as never, baseConfig);
+    const ctx = { agentId: "a1", projectId: "p1", latestMessage: "x".repeat(210) };
+    const result = await orch.execute(ctx);
+    assert.ok(result.sources.includes("graphify:brief:stale-skipped"));
+    assert.ok(result.brief.includes("Freshness: stale"));
+    assert.ok(!result.brief.includes("OldNode"));
+    assert.ok(!result.brief.includes("old-cluster"));
+    assert.ok(!result.brief.includes("stale graph summary should not be injected"));
+  });
+
+  it("does not inject graphBrief content when freshness is missing", async () => {
+    const client = makeClient({
+      graphBrief: async () => ({
+        freshness: "missing",
+        coreNodes: ["MissingNode"],
+        communities: ["missing-cluster"],
+        summary: "missing graph summary should not be injected"
+      })
+    });
+    const orch = new RecallOrchestrator(client as never, baseConfig);
+    const ctx = { agentId: "a1", projectId: "p1", latestMessage: "x".repeat(210) };
+    const result = await orch.execute(ctx);
+    assert.ok(!result.sources.some((s) => s.startsWith("graphify:")));
+    assert.ok(!result.brief.includes("MissingNode"));
+    assert.ok(!result.brief.includes("missing graph summary should not be injected"));
+  });
+
   it("gracefully skips graphBrief when sidecar throws", async () => {
     const client = makeClient({
       graphBrief: async () => {
@@ -324,6 +360,19 @@ describe("RecallOrchestrator.execute()", () => {
     assert.ok(capturedFiles.includes("entities-glossary.md"), "debug should include entities-glossary.md");
   });
 
+  it("does not read carriers for l0 prompts", async () => {
+    let carrierReadCalled = false;
+    const client = makeClient({
+      carrierRead: async () => {
+        carrierReadCalled = true;
+        return { carriers: [] };
+      }
+    });
+    const orch = new RecallOrchestrator(client as never, baseConfig);
+    await orch.execute({ agentId: "a1", projectId: "p1", latestMessage: "hi" });
+    assert.equal(carrierReadCalled, false);
+  });
+
   it("includes carrier source at l1 when carriers are populated", async () => {
     const client = makeClient({
       carrierRead: async () => ({
@@ -345,5 +394,83 @@ describe("RecallOrchestrator.execute()", () => {
     const ctx = { agentId: "a1", projectId: "p1", latestMessage: "x".repeat(210) };
     const result = await orch.execute(ctx);
     assert.ok(result.sources.some((s) => s.startsWith("carrier:")));
+  });
+
+  it("filters polluted carrier sections before prompt injection", async () => {
+    const client = makeClient({
+      carrierRead: async () => ({
+        carriers: [
+          {
+            filename: "self-model.md",
+            content: [
+              "# Self Model",
+              "Clean durable preference",
+              "<!-- memory-fabric:begin -->",
+              "memory-fabric block should disappear",
+              "<!-- memory-fabric:end -->",
+              "## Session Summary (Compaction)",
+              "compaction summary should disappear",
+              "## Dream Diary",
+              "dream diary should disappear",
+              "System: raw system log should disappear",
+              "User: raw user log should disappear",
+              "Assistant: raw assistant log should disappear"
+            ].join("\n"),
+            exists: true
+          }
+        ]
+      })
+    });
+    const orch = new RecallOrchestrator(client as never, baseConfig);
+    const result = await orch.execute({ agentId: "a1", projectId: "p1", latestMessage: "x".repeat(210) });
+    assert.ok(result.brief.includes("Clean durable preference"));
+    assert.ok(!result.brief.includes("memory-fabric block should disappear"));
+    assert.ok(!result.brief.includes("compaction summary should disappear"));
+    assert.ok(!result.brief.includes("dream diary should disappear"));
+    assert.ok(!result.brief.includes("raw system log should disappear"));
+    assert.ok(!result.brief.includes("raw user log should disappear"));
+    assert.ok(!result.brief.includes("raw assistant log should disappear"));
+  });
+
+  it("caps l1 legacy prompt injection near the configured budget", async () => {
+    const client = makeClient({
+      recall: async () => ({ memoryBrief: "brief", sources: ["s"], budgetUsed: 10 }),
+      carrierRead: async () => ({
+        carriers: [
+          {
+            filename: "self-model.md",
+            content: "a".repeat(5000),
+            exists: true
+          }
+        ]
+      })
+    });
+    const orch = new RecallOrchestrator(client as never, baseConfig);
+    const result = await orch.execute({ agentId: "a1", projectId: "p1", latestMessage: "x".repeat(210) });
+    assert.ok(result.brief.length <= 2200);
+    assert.ok(result.brief.endsWith("…"));
+  });
+
+  it("caps l2 legacy prompt injection near the configured budget", async () => {
+    const client = makeClient({
+      recall: async () => ({ memoryBrief: "brief", sources: ["s"], budgetUsed: 10 }),
+      carrierRead: async () => ({
+        carriers: [
+          {
+            filename: "decision-log.md",
+            content: "b".repeat(9000),
+            exists: true
+          }
+        ]
+      })
+    });
+    const orch = new RecallOrchestrator(client as never, baseConfig);
+    const result = await orch.execute({
+      agentId: "a1",
+      projectId: "p1",
+      latestMessage: "架构设计 " + "x".repeat(210)
+    });
+    assert.ok(result.brief.length <= 4500);
+    assert.ok(result.brief.endsWith("…"));
   });
 });

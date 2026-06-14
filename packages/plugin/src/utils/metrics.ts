@@ -18,6 +18,10 @@ export interface PluginMetrics {
   graphQueryCount: number;
   graphQueryTotalMs: number;
   carrierMergeConflictCount: number;
+  graphBriefStaleSkippedCount: number;
+  carrierInjectionFilteredCount: number;
+  carrierInjectionDroppedCount: number;
+  promptInjectionTruncatedCount: number;
 }
 
 function emptyMetrics(): PluginMetrics {
@@ -34,7 +38,11 @@ function emptyMetrics(): PluginMetrics {
     graphBootstrapTotalMs: 0,
     graphQueryCount: 0,
     graphQueryTotalMs: 0,
-    carrierMergeConflictCount: 0
+    carrierMergeConflictCount: 0,
+    graphBriefStaleSkippedCount: 0,
+    carrierInjectionFilteredCount: 0,
+    carrierInjectionDroppedCount: 0,
+    promptInjectionTruncatedCount: 0
   };
 }
 
@@ -73,6 +81,19 @@ export class MetricsCollector {
 
   recordCarrierMergeConflicts(count: number): void {
     this.data.carrierMergeConflictCount += count;
+  }
+
+  recordGraphBriefStaleSkipped(): void {
+    this.data.graphBriefStaleSkippedCount++;
+  }
+
+  recordCarrierInjection(filteredCount: number, droppedCount: number): void {
+    this.data.carrierInjectionFilteredCount += filteredCount;
+    this.data.carrierInjectionDroppedCount += droppedCount;
+  }
+
+  recordPromptInjectionTruncated(): void {
+    this.data.promptInjectionTruncatedCount++;
   }
 
   snapshot(): PluginMetrics & {

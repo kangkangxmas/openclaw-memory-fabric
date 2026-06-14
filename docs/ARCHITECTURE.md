@@ -157,6 +157,11 @@ Plugin: before_prompt_build hook
   │         ├─ 基础: self-model.md + project-model.md
   │         └─ 按 TaskType 扩展: debug→open-questions.md, architecture→decision-log.md ...
   │
+  ├─ PromptInjectionPolicy
+  │    ├─ Graphify freshness gate: missing 跳过，stale 只保留一行提示，fresh 注入详细结构
+  │    ├─ Carrier sanitizer: 过滤 memory-fabric 块、compaction summary、conversation summary、dream diary 和原始角色日志
+  │    └─ Legacy fallback budget: L1 ≤ 2200 chars，L2 ≤ 4500 chars
+  │
   └─ prependContext → 注入 Memory Brief 到 prompt
        <!-- memory-fabric:begin -->
        <!-- depth=l1 scope=project taskType=debug sources=openviking:project|patterns:debug -->
@@ -440,7 +445,13 @@ React 18 + Vite + TypeScript + Tailwind CSS 构建的 SPA，通过 `@fastify/sta
 
 plugin 的 `before_prompt_build` 会在每次召回前调用 `/v2/rollout/effective` 获取有效模式；sidecar `/commit` 也使用同一解析器，避免 Web 面板显示和真实写入/注入路径不一致。
 
-### 5.2 可选（经验蒸馏 LLM）
+### 5.2 OpenClaw 上下文压缩治理
+
+OpenClaw runtime compaction 仍由 `~/.openclaw/openclaw.json` 控制，Memory Fabric 不修改 OpenClaw 官方核心源码。全 Agent 默认采用提前保护配置：`reserveTokens=48000`、`reserveTokensFloor=30000`、`maxHistoryShare=0.65`、`maxActiveTranscriptBytes=16mb`、`notifyUser=true`，并要求压缩摘要包含 `Files Modified`、`Open Questions`、`Next Steps`。
+
+Memory Fabric 负责降低压缩后的二次污染风险：`before_prompt_build` 不再信任 stale Graphify 详细结构，也不会把 Carrier 中的 compaction summary、conversation summary、memory-fabric 注入块或原始 System/User/Assistant 日志重新注入 prompt。V2 Inspector 的 Context Health 区域通过 `/v2/context/health` 只读扫描当前 Gateway 日志和 session/trajectory 文件，报告 overflow、timeout、`already_compacted_recently`、stale detailed injection 和超限文件。日志读取按运行态优先级选择：LaunchAgent stdout 日志、`/tmp/openclaw` 当天/前一天日志、近期 legacy `~/.openclaw/logs/gateway*.log`；过旧 legacy 日志不参与当前健康判定。
+
+### 5.3 可选（经验蒸馏 LLM）
 
 | 变量 | 说明 | 示例 |
 |------|------|------|
@@ -450,7 +461,7 @@ plugin 的 `before_prompt_build` 会在每次召回前调用 `/v2/rollout/effect
 | `EXPERIENCE_LLM_MAX_TOKENS` | 最大 token | `512` |
 | `EXPERIENCE_LLM_TIMEOUT_MS` | 超时 | `5000` |
 
-### 5.3 可选（向量检索 Embedding）
+### 5.4 可选（向量检索 Embedding）
 
 | 变量 | 说明 | 示例 |
 |------|------|------|

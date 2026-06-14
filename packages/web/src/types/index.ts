@@ -435,6 +435,40 @@ export interface V2CanaryStatus {
   checks: V2CanaryCheck[];
 }
 
+export interface V2ContextHealthFileSummary {
+  path: string;
+  bytes: number;
+  archived: boolean;
+  kind: "transcript" | "trajectory";
+}
+
+export interface V2ContextHealthReport {
+  ok: boolean;
+  generatedAt: string;
+  openclawRoot: string;
+  thresholds: {
+    activeTranscriptMaxBytes: number;
+    trajectoryArchiveBytes: number;
+  };
+  files: {
+    sessionCount: number;
+    scannedFileCount: number;
+    maxTranscriptBytes: number;
+    maxTrajectoryBytes: number;
+    activeTranscriptWarnings: V2ContextHealthFileSummary[];
+    trajectoryArchiveCandidates: V2ContextHealthFileSummary[];
+  };
+  compaction: {
+    compactionCount: number;
+    overflowCount: number;
+    timeoutCount: number;
+    alreadyCompactedRecentlyCount: number;
+    staleBriefDetailedInjectionCount: number;
+    staleBriefSkippedCount: number;
+  };
+  warnings: string[];
+}
+
 export type V2Mode = "off" | "shadow" | "v2-recall" | "v2-write";
 
 export interface V2RolloutModeRow {

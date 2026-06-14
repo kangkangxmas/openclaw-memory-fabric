@@ -31,6 +31,7 @@ import type {
   V2BenchReport,
   V2BenchSeedResult,
   V2CanaryStatus,
+  V2ContextHealthReport,
   V2GrayStatus,
   V2Mode,
   V2Relation,
@@ -277,6 +278,8 @@ export const api = {
         opts?.expectedMode ? `expectedMode=${encodeURIComponent(opts.expectedMode)}` : "",
       ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
     ),
+
+  getV2ContextHealth: () => get<{ ok: boolean; report: V2ContextHealthReport }>("/v2/context/health"),
 
   getV2RolloutModes: (opts?: {
     agentIds?: string[];

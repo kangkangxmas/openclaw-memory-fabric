@@ -37,9 +37,11 @@ flowchart LR
   B --> C["/recall"]
   B --> D["graphBrief"]
   B --> E["carrierRead"]
-  C --> F["OpenVikingService"]
-  D --> G["GraphifyService"]
-  E --> H["CarrierRepository"]
+  B --> F["PromptInjectionPolicy"]
+  C --> G["OpenVikingService"]
+  D --> H["GraphifyService"]
+  E --> I["CarrierRepository"]
+  F --> J["freshness gate / carrier sanitizer / budget cap"]
 ```
 
 v2 读取规划链路：
@@ -64,6 +66,8 @@ flowchart LR
 - `CarrierProjectionEngine`：把结构化记忆审计为 Carrier Markdown 投影，支持 drift audit、apply、rollback 和 history。
 - `V2RelationGraphService`：记录 `DECIDES`、`IMPLEMENTS`、`SUPERSEDES`、`CAUSES`、`VALIDATES`、`CONSTRAINS` 关系边。
 - `RecallAuditLogService`：记录 v2-recall 灰度期间 legacy recall 与 v2 recall 的对照日志，包含 legacy sources/brief preview、v2 memory ids、evidence refs 和 card previews。
+- `PromptInjectionPolicy`：统一治理 legacy fallback 和 v2 召回注入，stale Graphify 只保留一行提示，Carrier 注入前过滤 compaction summary、conversation summary、memory-fabric 注入块和原始角色日志，并限制 L1/L2 注入长度。
+- `ContextHealthReporter`：只读扫描当前 OpenClaw Gateway 日志和 session/trajectory 文件，报告 compaction、overflow、timeout、stale detailed injection、超限 transcript 和 trajectory 归档候选；日志源优先使用 `~/Library/Logs/openclaw/gateway.log`，其次使用 `/tmp/openclaw/openclaw-YYYY-MM-DD.log`，最后才读取近期 legacy `~/.openclaw/logs/gateway*.log`，避免历史日志误报。
 - `MemoryBenchRunner`：内置 30+ 个 v0 用例，记录 Recall@5、Injection Precision、Stale Rate、Source Coverage、平均注入长度、P95 latency，并持久化 latest report。
 - `MemoryBenchFixtureSeeder`：把默认、自定义或持久化 fixture cases 可重复写入 L0 event、L1 candidate 并触发 promotion；用于真实灰度前建立稳定 fixture。
 
@@ -81,6 +85,7 @@ flowchart LR
 - `GET /v2/gray/status`：汇总灰度 mode、worker、candidate stats、recall audit、latest bench 和 readiness flags。
 - `POST /v2/recall/plan`：返回 retrieval plan、entries、memory cards 和渲染文本。
 - `POST /v2/recall/audit` / `GET /v2/recall/audit`：记录和查询 legacy/v2 recall 对照日志。
+- `GET /v2/context/health`：读取上下文压缩健康报告。
 - `GET /v2/memories/:id/trace`：查看 `sourceRefs`、原始 sources 和 L0 events。
 - `GET /v2/carriers/drift?agentId=&projectId=`：查看 Carrier 投影漂移。
 - `POST /v2/carriers/projection/apply`：应用结构化记忆到 Carrier 投影。

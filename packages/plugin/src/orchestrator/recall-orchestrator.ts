@@ -1,6 +1,11 @@
 import type { SidecarClient } from "../utils/sidecar-client.js";
 import type { MemoryFabricConfig, RecallDepth, MemoryScope, TaskType } from "../types/index.js";
 import type { MetricsCollector } from "../utils/metrics.js";
+import {
+  buildCarrierEnrichment,
+  composePromptInjection,
+  formatStructuralBriefForPrompt
+} from "./prompt-injection-policy.js";
 
 // ---------------------------------------------------------------------------
 // Context type — provided by the OpenClaw hook system
@@ -292,19 +297,10 @@ export class RecallOrchestrator {
       try {
         const brief = await this.client.graphBrief(ctx.projectId);
         this.metrics?.recordGraphQuery(Date.now() - graphStart);
-        if (brief.freshness !== "missing") {
-          structuralSection = [
-            "### Structural Brief",
-            `Freshness: ${brief.freshness} | Core entities: ${brief.coreNodes.slice(0, 5).join(", ")}`,
-            brief.communities.length > 0
-              ? `Clusters: ${brief.communities.slice(0, 3).join(" | ")}`
-              : "",
-            brief.summary.slice(0, 400)
-          ]
-            .filter(Boolean)
-            .join("\n");
-          sources.push(`graphify:brief:${brief.freshness}`);
-        }
+        const structural = formatStructuralBriefForPrompt(brief);
+        structuralSection = structural.section;
+        if (structural.source) sources.push(structural.source);
+        if (structural.staleSkipped) this.metrics?.recordGraphBriefStaleSkipped();
       } catch {
         // Graphify unavailable — skip without blocking
       }
@@ -328,26 +324,25 @@ export class RecallOrchestrator {
 
         const populated = carrierResp.carriers.filter((c) => c.exists);
         if (populated.length > 0) {
-          // Budget per carrier scales with depth: L1 gets 2 files, L2 gets 4
-          const perCarrierBudget = recallPlan.depth === "l2" ? 1500 : 800;
-          enrichment = populated
-            .map((c) => `### Carrier: ${c.filename}\n${c.content.slice(0, perCarrierBudget)}`)
-            .join("\n\n");
-          sources.push("carrier:" + populated.map((c) => c.filename).join(","));
+          const carrierInjection = buildCarrierEnrichment(populated, recallPlan.depth);
+          enrichment = carrierInjection.enrichment;
+          this.metrics?.recordCarrierInjection(carrierInjection.filteredCount, carrierInjection.droppedCount);
+          if (carrierInjection.filenames.length > 0) {
+            sources.push("carrier:" + carrierInjection.filenames.join(","));
+          }
         }
       } catch {
         // Carrier read failure is non-fatal — log and continue with core brief only
       }
     }
 
-    const combined = [structuralSection, recallResp.memoryBrief, enrichment]
-      .filter(Boolean)
-      .join("\n\n---\n\n");
+    const combined = composePromptInjection([structuralSection, recallResp.memoryBrief, enrichment], recallPlan.depth);
+    if (combined.truncated) this.metrics?.recordPromptInjectionTruncated();
 
     return {
-      brief: combined,
+      brief: combined.text,
       sources,
-      budgetUsed: recallResp.budgetUsed,
+      budgetUsed: Math.ceil(combined.text.length / 4),
       plan: recallPlan
     };
   }

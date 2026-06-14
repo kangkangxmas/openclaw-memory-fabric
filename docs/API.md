@@ -378,6 +378,22 @@ Payload 可包含：
 
 查询 recall 对照日志，支持 `agentId`、`projectId`、`limit`。返回最近 audit entries，包含 query、mode、legacy 对照指标、v2 memory ids、evidence refs 和卡片预览。
 
+### GET /v2/context/health
+
+只读上下文压缩健康报告。该接口不归档、不删除、不修改 OpenClaw 会话文件；它扫描常见 `*.jsonl` / `*.trajectory.jsonl` 文件，并按运行态优先级读取当前 Gateway 日志：`~/Library/Logs/openclaw/gateway.log`，然后是 `/tmp/openclaw/openclaw-YYYY-MM-DD.log`，最后才是近期 legacy `~/.openclaw/logs/gateway*.log`。过旧 legacy 日志会被跳过，避免历史 stale Graphify 记录污染当前健康状态。
+
+Response 包含：
+
+- `report.thresholds.activeTranscriptMaxBytes`：活跃 transcript 阈值，默认 16MB。
+- `report.thresholds.trajectoryArchiveBytes`：trajectory 归档候选阈值，默认 20MB。
+- `report.files.sessionCount`、`scannedFileCount`、`maxTranscriptBytes`、`maxTrajectoryBytes`；两个 `max*Bytes` 只统计未归档活跃文件。
+- `report.files.activeTranscriptWarnings`：未归档且超过阈值的 transcript。
+- `report.files.trajectoryArchiveCandidates`：未归档且超过阈值的 `.trajectory.jsonl`。
+- `report.compaction.compactionCount`、`overflowCount`、`timeoutCount`、`alreadyCompactedRecentlyCount`。
+- `report.compaction.staleBriefDetailedInjectionCount`：日志中仍出现 stale Graphify 详细注入的次数。
+- `report.compaction.staleBriefSkippedCount`：stale Graphify 被降级跳过详细注入的次数。
+- `report.warnings`：面向 Inspector 的聚合告警。
+
 ### GET /v2/memories/:id/trace
 
 查看稳定记忆的 source trace：`sourceRefs`、原始 sources、L0 events、relation trace。

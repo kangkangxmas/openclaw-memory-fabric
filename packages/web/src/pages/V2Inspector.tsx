@@ -11,6 +11,7 @@ import type {
   V2Candidate,
   V2CandidateStats,
   V2ConsolidationStatus,
+  V2ContextHealthReport,
   V2GrayStatus,
   V2Mode,
   V2RecallAuditEntry,
@@ -59,6 +60,12 @@ function formatTime(value: string | undefined): string {
   if (!value) return "-";
   const time = new Date(value);
   return Number.isNaN(time.getTime()) ? value : time.toLocaleString();
+}
+
+function formatBytes(value: number): string {
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
 }
 
 function textField(record: TraceRecord | undefined, keys: string[]): string {
@@ -140,6 +147,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const [seed, setSeed] = useState<V2BenchSeedResult | null>(null);
   const [gray, setGray] = useState<V2GrayStatus | null>(null);
   const [canary, setCanary] = useState<V2CanaryStatus | null>(null);
+  const [contextHealth, setContextHealth] = useState<V2ContextHealthReport | null>(null);
   const [recallAudit, setRecallAudit] = useState<V2RecallAuditEntry[]>([]);
   const [rollout, setRollout] = useState<V2RolloutModesResponse | null>(null);
   const [modeDrafts, setModeDrafts] = useState<Record<string, V2Mode>>({});
@@ -245,13 +253,14 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     const agentId = ctx.agentId || undefined;
     const projectId = ctx.projectId || undefined;
     const rolloutScopes = await loadRolloutScopes();
-    const [candidateRes, statusRes, grayRes, fixtureRes, auditRes, canaryRes, rolloutRes] = await Promise.all([
+    const [candidateRes, statusRes, grayRes, fixtureRes, auditRes, canaryRes, contextHealthRes, rolloutRes] = await Promise.all([
       api.getV2Candidates(agentId, projectId),
       api.getV2ConsolidationStatus(agentId, projectId),
       api.getV2GrayStatus(agentId, projectId),
       api.getV2BenchFixtures(),
       api.getV2RecallAudit(agentId, projectId, 12),
       api.getV2CanaryStatus({ agentId: CANARY_AGENT_ID, projectId: CANARY_PROJECT_ID, expectedMode: CANARY_EXPECTED_MODE }),
+      api.getV2ContextHealth(),
       api.getV2RolloutModes({ scopes: rolloutScopes, agentId, projectId }),
     ]);
     setCandidates(candidateRes.candidates);
@@ -261,6 +270,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setFixtures(fixtureRes);
     setRecallAudit(auditRes.entries);
     setCanary(canaryRes);
+    setContextHealth(contextHealthRes.report);
     setRollout(rolloutRes);
     setModeDrafts((prev) => {
       const next = { ...prev };
@@ -498,6 +508,15 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const selectedContext = `${ctx.agentId || "-"} / ${ctx.projectId || "-"}`;
   const canaryContext = `${CANARY_AGENT_ID} / ${CANARY_PROJECT_ID}`;
   const workerContext = `${worker?.agentId ?? "-"} / ${worker?.projectId ?? "-"}`;
+  const contextHealthStatus = !contextHealth
+    ? "default"
+    : contextHealth.compaction.overflowCount > 0 ||
+      contextHealth.compaction.timeoutCount > 0 ||
+      contextHealth.compaction.staleBriefDetailedInjectionCount > 0
+      ? "fail"
+      : contextHealth.warnings.length > 0
+        ? "warn"
+        : "ready";
   const selectedDiffersFromCanary = !!ctx.agentId && (ctx.agentId !== CANARY_AGENT_ID || (ctx.projectId || "") !== CANARY_PROJECT_ID);
   const rolloutRows = rollout?.modes ?? [];
 
@@ -549,6 +568,67 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
         {selectedDiffersFromCanary && (
           <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
             {t("v2.context.mismatch")}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-bold text-ink">{t("v2.contextHealth.title")}</h2>
+              <CompactBadge status={contextHealthStatus}>{contextHealthStatus}</CompactBadge>
+            </div>
+            <div className="mt-1 text-xs text-muted">{t("v2.contextHealth.desc")}</div>
+            {contextHealth && (
+              <div className="mt-2 font-mono text-xs text-muted">
+                {contextHealth.openclawRoot} · {formatTime(contextHealth.generatedAt)}
+              </div>
+            )}
+          </div>
+          <div className="grid min-w-full gap-2 sm:grid-cols-2 xl:min-w-[860px] xl:grid-cols-6">
+            <Metric label={t("v2.contextHealth.compactions")} value={contextHealth?.compaction.compactionCount ?? "-"} />
+            <Metric label={t("v2.contextHealth.overflow")} value={contextHealth?.compaction.overflowCount ?? "-"} />
+            <Metric label={t("v2.contextHealth.timeout")} value={contextHealth?.compaction.timeoutCount ?? "-"} />
+            <Metric label={t("v2.contextHealth.maxTranscript")} value={contextHealth ? formatBytes(contextHealth.files.maxTranscriptBytes) : "-"} />
+            <Metric label={t("v2.contextHealth.archive")} value={contextHealth?.files.trajectoryArchiveCandidates.length ?? "-"} />
+            <Metric label={t("v2.contextHealth.stale")} value={contextHealth?.compaction.staleBriefDetailedInjectionCount ?? "-"} />
+          </div>
+        </div>
+        {contextHealth && (
+          <div className="mt-4 grid gap-3 xl:grid-cols-2">
+            <div className="rounded-lg border border-line bg-deep px-3 py-2 text-xs text-muted">
+              <div className="font-bold text-ink">{t("v2.contextHealth.files")}</div>
+              <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                <span>{t("v2.contextHealth.sessions")}: {contextHealth.files.sessionCount}</span>
+                <span>{t("v2.contextHealth.scanned")}: {contextHealth.files.scannedFileCount}</span>
+                <span>{t("v2.contextHealth.activeWarnings")}: {contextHealth.files.activeTranscriptWarnings.length}</span>
+                <span>{t("v2.contextHealth.maxTrajectory")}: {formatBytes(contextHealth.files.maxTrajectoryBytes)}</span>
+              </div>
+              {contextHealth.files.activeTranscriptWarnings[0] && (
+                <div className="mt-2 font-mono text-amber-200">
+                  {contextHealth.files.activeTranscriptWarnings[0].path} · {formatBytes(contextHealth.files.activeTranscriptWarnings[0].bytes)}
+                </div>
+              )}
+            </div>
+            <div className="rounded-lg border border-line bg-deep px-3 py-2 text-xs text-muted">
+              <div className="font-bold text-ink">{t("v2.contextHealth.signals")}</div>
+              <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                <span>already_recent: {contextHealth.compaction.alreadyCompactedRecentlyCount}</span>
+                <span>stale_skipped: {contextHealth.compaction.staleBriefSkippedCount}</span>
+                <span>threshold: {formatBytes(contextHealth.thresholds.activeTranscriptMaxBytes)}</span>
+                <span>trajectory: {formatBytes(contextHealth.thresholds.trajectoryArchiveBytes)}</span>
+              </div>
+              {contextHealth.warnings.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {contextHealth.warnings.slice(0, 4).map((warning) => (
+                    <CompactBadge key={warning} status="warn">{warning}</CompactBadge>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 text-emerald-200">{t("v2.contextHealth.noWarnings")}</div>
+              )}
+            </div>
           </div>
         )}
       </section>
