@@ -742,6 +742,18 @@ describe("Memory Fabric V2", () => {
     const latestBenchBody = JSON.parse(latestBenchRes.body);
     expect(latestBenchBody.report.cases).toBe(1);
 
+    const emptyFixtureBenchRes = await app.inject({
+      method: "POST",
+      url: "/v2/bench/run",
+      payload: { useFixtures: true },
+    });
+    const emptyFixtureBenchBody = JSON.parse(emptyFixtureBenchRes.body);
+    expect(emptyFixtureBenchBody.report.cases).toBe(0);
+
+    const latestAfterEmptyBenchRes = await app.inject({ method: "GET", url: "/v2/bench/report" });
+    const latestAfterEmptyBenchBody = JSON.parse(latestAfterEmptyBenchRes.body);
+    expect(latestAfterEmptyBenchBody.report.cases).toBe(1);
+
     const seedRes = await app.inject({
       method: "POST",
       url: "/v2/bench/seed",

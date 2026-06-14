@@ -290,7 +290,9 @@ export class MemoryBenchRunner {
       p95LatencyMs: percentile(latencies, 0.95),
       results,
     };
-    await this.persist(report);
+    if (report.cases > 0) {
+      await this.persist(report);
+    }
     return report;
   }
 
