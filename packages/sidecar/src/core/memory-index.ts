@@ -215,6 +215,16 @@ export class MemoryIndex {
     this.add(entry);
   }
 
+  /** Read indexed entries by id without falling back to filesystem scans. */
+  entriesByIds(ids: string[]): MemoryEntryV2[] {
+    const entries: MemoryEntryV2[] = [];
+    for (const id of ids) {
+      const entry = this.entryMap.get(id);
+      if (entry) entries.push(entry);
+    }
+    return entries;
+  }
+
   // -------------------------------------------------------------------------
   // Query
   // -------------------------------------------------------------------------

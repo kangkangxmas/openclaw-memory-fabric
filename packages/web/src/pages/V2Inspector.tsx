@@ -5,6 +5,7 @@ import type {
   V2BenchFixtureSet,
   V2BenchReport,
   V2BenchSeedResult,
+  V2BenchStatus,
   V2CanaryStatus,
   V2CarrierDriftReport,
   V2CarrierProjectionRecord,
@@ -143,6 +144,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const [worker, setWorker] = useState<V2ConsolidationStatus | null>(null);
   const [projection, setProjection] = useState<V2CarrierProjectionRecord | null>(null);
   const [bench, setBench] = useState<V2BenchReport | null>(null);
+  const [benchStatus, setBenchStatus] = useState<V2BenchStatus | null>(null);
   const [fixtures, setFixtures] = useState<V2BenchFixtureSet | null>(null);
   const [seed, setSeed] = useState<V2BenchSeedResult | null>(null);
   const [gray, setGray] = useState<V2GrayStatus | null>(null);
@@ -253,11 +255,12 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     const agentId = ctx.agentId || undefined;
     const projectId = ctx.projectId || undefined;
     const rolloutScopes = await loadRolloutScopes();
-    const [candidateRes, statusRes, grayRes, fixtureRes, auditRes, canaryRes, contextHealthRes, rolloutRes] = await Promise.all([
+    const [candidateRes, statusRes, grayRes, fixtureRes, benchStatusRes, auditRes, canaryRes, contextHealthRes, rolloutRes] = await Promise.all([
       api.getV2Candidates(agentId, projectId),
       api.getV2ConsolidationStatus(agentId, projectId),
       api.getV2GrayStatus(agentId, projectId),
       api.getV2BenchFixtures(),
+      api.getV2BenchStatus(),
       api.getV2RecallAudit(agentId, projectId, 12),
       api.getV2CanaryStatus({ agentId: CANARY_AGENT_ID, projectId: CANARY_PROJECT_ID, expectedMode: CANARY_EXPECTED_MODE }),
       api.getV2ContextHealth(),
@@ -268,6 +271,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setWorker(statusRes.status);
     setGray(grayRes);
     setFixtures(fixtureRes);
+    setBenchStatus(benchStatusRes);
     setRecallAudit(auditRes.entries);
     setCanary(canaryRes);
     setContextHealth(contextHealthRes.report);
@@ -403,26 +407,37 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const loadBench = async () => {
+    if (!window.confirm(t("v2.confirm.runBench"))) return;
     const res = await api.postV2BenchRun({
       agentId: ctx.agentId || undefined,
       projectId: ctx.projectId || undefined,
+      caseTimeoutMs: 5000,
+      totalTimeoutMs: 60000,
+      persist: false,
     });
     setBench(res.report);
+    setBenchStatus(await api.getV2BenchStatus());
   };
 
   const loadFixtureBench = async () => {
+    if (!window.confirm(t("v2.confirm.runFixtureBench"))) return;
     const res = await api.postV2BenchRun({
       agentId: ctx.agentId || undefined,
       projectId: ctx.projectId || undefined,
       useFixtures: true,
       limit: 50,
+      caseTimeoutMs: 5000,
+      totalTimeoutMs: 60000,
+      persist: true,
     });
     setBench(res.report);
+    setBenchStatus(await api.getV2BenchStatus());
   };
 
   const loadLatestBench = async () => {
-    const res = await api.getV2BenchReport();
+    const [res, statusRes] = await Promise.all([api.getV2BenchReport(), api.getV2BenchStatus()]);
     setBench(res.report);
+    setBenchStatus(statusRes);
   };
 
   const seedBench = async (useFixtures = false) => {
@@ -433,6 +448,8 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const conflictCards = (recall?.cards ?? []).filter((card) => card.conflict);
+  const benchRunning = benchStatus?.state === "running";
+  const benchActive = benchStatus?.activeRun;
   const reviewReasonCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const candidate of candidates) {
@@ -1390,12 +1407,21 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
 
         <div className="rounded-lg border border-line bg-panel/85 shadow-card overflow-hidden">
           <div className="border-b border-line px-4 py-3">
-            <div className="text-sm font-bold text-ink">{t("v2.quality")}</div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-bold text-ink">{t("v2.quality")}</div>
+              {bench && <CompactBadge status={bench.status ?? "complete"}>{bench.status ?? "complete"}</CompactBadge>}
+            </div>
             <div className="text-xs text-muted">
               Memory Bench v0{bench ? ` · ${bench.generatedAt}` : ""}
             </div>
           </div>
           <div className="p-4 space-y-4">
+            {benchRunning && benchActive && (
+              <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+                {t("v2.bench.running")}: {benchActive.casesCompleted}/{benchActive.casesTotal}
+                {benchActive.lastCaseId ? ` · ${benchActive.lastCaseId}` : ""}
+              </div>
+            )}
             {bench ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-2">
@@ -1405,13 +1431,22 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   <Metric label="Source Coverage" value={pct(bench.sourceCoverage)} />
                   <Metric label="Avg Card Chars" value={Math.round(bench.avgCardChars)} />
                   <Metric label="P95 Latency" value={`${bench.p95LatencyMs}ms`} />
+                  <Metric label="Completed" value={`${bench.completedCases ?? bench.cases}/${bench.cases}`} />
+                  <Metric label="Errors" value={`${bench.errorCount ?? bench.errors?.length ?? 0}`} />
+                  <Metric label="Duration" value={bench.durationMs !== undefined ? `${bench.durationMs}ms` : "-"} />
                 </div>
+                {bench.errors && bench.errors.length > 0 && (
+                  <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-100">
+                    {bench.errors.slice(0, 3).map((item) => `${item.id}: ${item.message}`).join(" · ")}
+                  </div>
+                )}
                 <div className="max-h-52 overflow-auto rounded-lg border border-line">
                   <table className="w-full text-xs">
                     <tbody>
                       {bench.results.slice(0, 12).map((row) => (
                         <tr key={row.id} className="border-b border-line/50">
                           <td className="px-3 py-2 text-ink">{row.id}</td>
+                          <td className="px-3 py-2 text-right text-muted">{row.status ?? (row.hit ? "pass" : "miss")}</td>
                           <td className="px-3 py-2 text-right text-muted">{row.cardCount} cards</td>
                           <td className="px-3 py-2 text-right text-muted">{row.latencyMs}ms</td>
                         </tr>
@@ -1441,14 +1476,14 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                 </button>
                 <button
                   onClick={() => void run("bench", loadBench)}
-                  disabled={!!loading}
+                  disabled={!!loading || benchRunning}
                   className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs disabled:opacity-50"
                 >
                   Run Bench
                 </button>
                 <button
                   onClick={() => void run("bench-fixtures", loadFixtureBench)}
-                  disabled={!!loading}
+                  disabled={!!loading || benchRunning}
                   className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
                 >
                   Fixture Bench

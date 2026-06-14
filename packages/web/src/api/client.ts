@@ -30,6 +30,7 @@ import type {
   V2BenchFixtureSet,
   V2BenchReport,
   V2BenchSeedResult,
+  V2BenchStatus,
   V2CanaryStatus,
   V2ContextHealthReport,
   V2GrayStatus,
@@ -240,10 +241,15 @@ export const api = {
     projectId?: string;
     limit?: number;
     useFixtures?: boolean;
+    caseTimeoutMs?: number;
+    totalTimeoutMs?: number;
+    persist?: boolean;
     cases?: V2BenchCase[];
   }) => post<{ ok: boolean; report: V2BenchReport }>("/v2/bench/run", opts ?? {}),
 
   getV2BenchReport: () => get<{ ok: boolean; report: V2BenchReport | null }>("/v2/bench/report"),
+
+  getV2BenchStatus: () => get<V2BenchStatus>("/v2/bench/status"),
 
   getV2BenchFixtures: () => get<V2BenchFixtureSet>("/v2/bench/fixtures"),
 

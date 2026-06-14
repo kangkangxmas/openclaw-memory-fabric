@@ -16,7 +16,12 @@ import { MemoryConsolidator } from "../services/memory-consolidator.js";
 import { ConsolidationWorker } from "../services/consolidation-worker.js";
 import { RetrievalPlanner } from "../services/retrieval-planner.js";
 import { CarrierProjectionEngine } from "../services/carrier-projection-engine.js";
-import { MemoryBenchRunner, type MemoryBenchCase, type MemoryBenchRunOptions } from "../services/memory-bench-runner.js";
+import {
+  MemoryBenchAlreadyRunningError,
+  MemoryBenchRunner,
+  type MemoryBenchCase,
+  type MemoryBenchRunOptions,
+} from "../services/memory-bench-runner.js";
 import { MemoryBenchFixtureSeeder } from "../services/memory-bench-fixture-seeder.js";
 import { V2RelationGraphService, type V2RelationType } from "../services/v2-relation-graph-service.js";
 import { RecallAuditLogService } from "../services/recall-audit-log-service.js";
@@ -1083,9 +1088,25 @@ export function registerV2Routes(
   // -------------------------------------------------------------------------
   app.post<{
     Body: MemoryBenchRunOptions;
-  }>("/v2/bench/run", async (request) => {
-    const report = await benchRunner.run(request.body ?? {});
-    return { ok: true, report };
+  }>("/v2/bench/run", async (request, reply) => {
+    try {
+      const report = await benchRunner.run(request.body ?? {});
+      return { ok: true, report };
+    } catch (error) {
+      if (error instanceof MemoryBenchAlreadyRunningError) {
+        return reply.status(409).send({
+          ok: false,
+          error: error.message,
+          activeRun: error.activeRun,
+        });
+      }
+      throw error;
+    }
+  });
+
+  app.get("/v2/bench/status", async () => {
+    const status = await benchRunner.status();
+    return { ok: true, ...status };
   });
 
   app.get("/v2/bench/report", async () => {

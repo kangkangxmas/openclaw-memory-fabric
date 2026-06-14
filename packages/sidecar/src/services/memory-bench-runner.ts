@@ -20,6 +20,9 @@ export interface MemoryBenchRunOptions {
   projectId?: string;
   limit?: number;
   useFixtures?: boolean;
+  caseTimeoutMs?: number;
+  totalTimeoutMs?: number;
+  persist?: boolean;
 }
 
 export interface MemoryBenchFixtureSet {
@@ -35,19 +38,67 @@ export interface MemoryBenchFixtureWriteOptions {
 
 export interface MemoryBenchReport {
   generatedAt: string;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  status: "complete" | "partial" | "failed";
   cases: number;
+  completedCases: number;
+  timedOutCases: number;
+  errorCount: number;
   recallAt5: number;
   injectionPrecision: number;
   staleRate: number;
   sourceCoverage: number;
   avgCardChars: number;
   p95LatencyMs: number;
+  errors: Array<{
+    id: string;
+    message: string;
+  }>;
   results: Array<{
     id: string;
     hit: boolean;
     cardCount: number;
     latencyMs: number;
+    status: "pass" | "miss" | "timeout" | "error";
+    error?: string;
   }>;
+}
+
+export interface MemoryBenchActiveRun {
+  runId: string;
+  state: "running";
+  startedAt: string;
+  casesTotal: number;
+  casesCompleted: number;
+  caseTimeoutMs: number;
+  totalTimeoutMs: number;
+  lastCaseId?: string;
+}
+
+export interface MemoryBenchReportSummary {
+  generatedAt: string;
+  status: MemoryBenchReport["status"];
+  cases: number;
+  completedCases: number;
+  recallAt5: number;
+  injectionPrecision: number;
+  sourceCoverage: number;
+  p95LatencyMs: number;
+}
+
+export interface MemoryBenchStatus {
+  state: "idle" | "running";
+  activeRun?: MemoryBenchActiveRun;
+  latestReport: MemoryBenchReportSummary | null;
+}
+
+export class MemoryBenchAlreadyRunningError extends Error {
+  constructor(readonly activeRun: MemoryBenchActiveRun) {
+    super("Memory Bench is already running");
+    this.name = "MemoryBenchAlreadyRunningError";
+  }
 }
 
 export const DEFAULT_MEMORY_BENCH_CASES: MemoryBenchCase[] = [
@@ -213,6 +264,12 @@ export const DEFAULT_MEMORY_BENCH_CASES: MemoryBenchCase[] = [
   },
 ];
 
+const DEFAULT_CASE_TIMEOUT_MS = 5_000;
+const DEFAULT_TOTAL_TIMEOUT_MS = 60_000;
+const MIN_TIMEOUT_MS = 100;
+const MAX_CASE_TIMEOUT_MS = 60_000;
+const MAX_TOTAL_TIMEOUT_MS = 300_000;
+
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -223,6 +280,7 @@ export class MemoryBenchRunner {
   private readonly latestPath?: string;
   private readonly historyPath?: string;
   private readonly fixturesPath?: string;
+  private activeRun?: MemoryBenchActiveRun;
 
   constructor(
     private readonly planner: RetrievalPlanner,
@@ -237,68 +295,105 @@ export class MemoryBenchRunner {
   }
 
   async run(input: MemoryBenchCase[] | MemoryBenchRunOptions = DEFAULT_MEMORY_BENCH_CASES): Promise<MemoryBenchReport> {
+    if (this.activeRun) throw new MemoryBenchAlreadyRunningError(this.activeRun);
+
     const cases = await this.resolveCases(input);
+    const controls = resolveRunControls(input);
+    const startedAt = new Date().toISOString();
+    const startedMs = Date.now();
+    const deadlineMs = startedMs + controls.totalTimeoutMs;
+    const activeRun: MemoryBenchActiveRun = {
+      runId: `bench_${startedMs}_${Math.random().toString(36).slice(2, 8)}`,
+      state: "running",
+      startedAt,
+      casesTotal: cases.length,
+      casesCompleted: 0,
+      caseTimeoutMs: controls.caseTimeoutMs,
+      totalTimeoutMs: controls.totalTimeoutMs,
+    };
+    this.activeRun = activeRun;
+
     const results: MemoryBenchReport["results"] = [];
+    const errors: MemoryBenchReport["errors"] = [];
     let hits = 0;
     let usefulCards = 0;
     let totalCards = 0;
     let staleCards = 0;
     let cardsWithSources = 0;
     let totalCardChars = 0;
+    let timedOutCases = 0;
     const latencies: number[] = [];
 
-    for (const benchCase of cases) {
-      const started = Date.now();
-      const recall = await this.planner.recall({
-        query: benchCase.query,
-        agentId: benchCase.agentId,
-        projectId: benchCase.projectId,
-        limit: 5,
-      });
-      const latencyMs = Date.now() - started;
-      latencies.push(latencyMs);
-      const haystack = recall.cards.map((card) => card.content).join("\n").toLowerCase();
-      const hit = benchCase.expectedTerms.some((term) => haystack.includes(term.toLowerCase()));
-      if (hit) hits++;
-
-      for (const card of recall.cards) {
-        totalCards++;
-        totalCardChars += card.content.length;
-        if (benchCase.expectedTerms.some((term) => card.content.toLowerCase().includes(term.toLowerCase()))) {
-          usefulCards++;
+    try {
+      for (const benchCase of cases) {
+        if (Date.now() >= deadlineMs) {
+          errors.push({ id: benchCase.id, message: `bench run exceeded total timeout ${controls.totalTimeoutMs}ms` });
+          break;
         }
-        if (card.conflict) staleCards++;
-        if (card.evidence.length > 0) cardsWithSources++;
-      }
 
-      results.push({
-        id: benchCase.id,
-        hit,
-        cardCount: recall.cards.length,
-        latencyMs,
-      });
+        activeRun.lastCaseId = benchCase.id;
+        const remainingMs = Math.max(MIN_TIMEOUT_MS, deadlineMs - Date.now());
+        const caseTimeoutMs = Math.min(controls.caseTimeoutMs, remainingMs);
+        const outcome = await this.runCase(benchCase, caseTimeoutMs);
+        activeRun.casesCompleted++;
+        results.push(outcome.result);
+        latencies.push(outcome.result.latencyMs);
+
+        if (outcome.result.status === "timeout") timedOutCases++;
+        if (outcome.result.error) errors.push({ id: benchCase.id, message: outcome.result.error });
+        if (!outcome.recall) continue;
+
+        if (outcome.result.hit) hits++;
+        for (const card of outcome.recall.cards) {
+          totalCards++;
+          totalCardChars += card.content.length;
+          if (benchCase.expectedTerms.some((term) => card.content.toLowerCase().includes(term.toLowerCase()))) {
+            usefulCards++;
+          }
+          if (card.conflict) staleCards++;
+          if (card.evidence.length > 0) cardsWithSources++;
+        }
+      }
+    } finally {
+      if (this.activeRun?.runId === activeRun.runId) this.activeRun = undefined;
     }
 
+    const completedAt = new Date().toISOString();
+    const status = results.length === cases.length && errors.length === 0 ? "complete" : results.length > 0 ? "partial" : "failed";
     const report: MemoryBenchReport = {
-      generatedAt: new Date().toISOString(),
+      generatedAt: completedAt,
+      startedAt,
+      completedAt,
+      durationMs: Date.now() - startedMs,
+      status,
       cases: cases.length,
+      completedCases: results.length,
+      timedOutCases,
+      errorCount: errors.length,
       recallAt5: cases.length > 0 ? hits / cases.length : 0,
       injectionPrecision: totalCards > 0 ? usefulCards / totalCards : 0,
       staleRate: totalCards > 0 ? staleCards / totalCards : 0,
       sourceCoverage: totalCards > 0 ? cardsWithSources / totalCards : 0,
       avgCardChars: totalCards > 0 ? totalCardChars / totalCards : 0,
       p95LatencyMs: percentile(latencies, 0.95),
+      errors,
       results,
     };
-    if (report.cases > 0) {
-      await this.persist(report);
-    }
+    if (report.status === "complete" && report.cases > 0 && shouldPersistReport(input)) await this.persist(report);
     return report;
   }
 
   async latest(): Promise<MemoryBenchReport | null> {
     if (!this.latestPath || !existsSync(this.latestPath)) return null;
     return JSON.parse(await readFile(this.latestPath, "utf8")) as MemoryBenchReport;
+  }
+
+  async status(): Promise<MemoryBenchStatus> {
+    return {
+      state: this.activeRun ? "running" : "idle",
+      activeRun: this.activeRun,
+      latestReport: summarizeReport(await this.latest()),
+    };
   }
 
   async fixtures(): Promise<MemoryBenchFixtureSet> {
@@ -328,6 +423,70 @@ export class MemoryBenchRunner {
     await appendJsonl(this.historyPath, report);
   }
 
+  private async runCase(benchCase: MemoryBenchCase, timeoutMs: number): Promise<{
+    result: MemoryBenchReport["results"][number];
+    recall?: Awaited<ReturnType<RetrievalPlanner["recall"]>>;
+  }> {
+    const started = Date.now();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<"timeout">((resolve) => {
+      timeout = setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+    const recallPromise = this.planner
+      .recall({
+        query: benchCase.query,
+        agentId: benchCase.agentId,
+        projectId: benchCase.projectId,
+        limit: 5,
+      })
+      .then((recall) => ({ recall }))
+      .catch((error: unknown) => ({ error }));
+
+    const outcome = await Promise.race([recallPromise, timeoutPromise]);
+    if (timeout) clearTimeout(timeout);
+    const latencyMs = Date.now() - started;
+
+    if (outcome === "timeout") {
+      return {
+        result: {
+          id: benchCase.id,
+          hit: false,
+          cardCount: 0,
+          latencyMs,
+          status: "timeout",
+          error: `case timed out after ${timeoutMs}ms`,
+        },
+      };
+    }
+
+    if ("error" in outcome) {
+      const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+      return {
+        result: {
+          id: benchCase.id,
+          hit: false,
+          cardCount: 0,
+          latencyMs,
+          status: "error",
+          error: message,
+        },
+      };
+    }
+
+    const haystack = outcome.recall.cards.map((card) => card.content).join("\n").toLowerCase();
+    const hit = benchCase.expectedTerms.some((term) => haystack.includes(term.toLowerCase()));
+    return {
+      recall: outcome.recall,
+      result: {
+        id: benchCase.id,
+        hit,
+        cardCount: outcome.recall.cards.length,
+        latencyMs,
+        status: hit ? "pass" : "miss",
+      },
+    };
+  }
+
   private async resolveCases(input: MemoryBenchCase[] | MemoryBenchRunOptions): Promise<MemoryBenchCase[]> {
     if (Array.isArray(input)) {
       return applyRunScope(input, {});
@@ -342,6 +501,41 @@ export class MemoryBenchRunner {
     const cases = Array.isArray(raw) ? raw : raw.cases ?? [];
     return cases.map((item) => normalizeCase(item)).filter((item) => item.id && item.query);
   }
+}
+
+function clampTimeout(value: number | undefined, fallback: number, max: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(MIN_TIMEOUT_MS, Math.min(Math.floor(value!), max));
+}
+
+function resolveRunControls(input: MemoryBenchCase[] | MemoryBenchRunOptions): { caseTimeoutMs: number; totalTimeoutMs: number } {
+  if (Array.isArray(input)) {
+    return { caseTimeoutMs: DEFAULT_CASE_TIMEOUT_MS, totalTimeoutMs: DEFAULT_TOTAL_TIMEOUT_MS };
+  }
+  return {
+    caseTimeoutMs: clampTimeout(input.caseTimeoutMs, DEFAULT_CASE_TIMEOUT_MS, MAX_CASE_TIMEOUT_MS),
+    totalTimeoutMs: clampTimeout(input.totalTimeoutMs, DEFAULT_TOTAL_TIMEOUT_MS, MAX_TOTAL_TIMEOUT_MS),
+  };
+}
+
+function shouldPersistReport(input: MemoryBenchCase[] | MemoryBenchRunOptions): boolean {
+  if (Array.isArray(input)) return true;
+  if (input.persist !== undefined) return input.persist;
+  return Boolean(input.useFixtures || input.cases?.length);
+}
+
+function summarizeReport(report: MemoryBenchReport | null): MemoryBenchReportSummary | null {
+  if (!report) return null;
+  return {
+    generatedAt: report.generatedAt,
+    status: report.status ?? "complete",
+    cases: report.cases,
+    completedCases: report.completedCases ?? report.cases,
+    recallAt5: report.recallAt5,
+    injectionPrecision: report.injectionPrecision,
+    sourceCoverage: report.sourceCoverage,
+    p95LatencyMs: report.p95LatencyMs,
+  };
 }
 
 function normalizeCase(item: MemoryBenchCase): MemoryBenchCase {

@@ -59,7 +59,7 @@
 - 每日查看 `/v2/gray/status?agentId=development`，确认 mode、worker、candidate queue、latest bench 和 readiness flags。
 - 每日查看 `/v2/recall/audit`，对比 legacy source count、legacy budget、legacy brief preview、v2 card count、v2 evidence refs、v2 memory ids 和 card previews。
 - 每日查看 `/v2/consolidation/status` 和 candidates stats，确保 pending 不堆积、needs_review 可解释。
-- 每日运行 `/v2/bench/run`，保存 `/v2/bench/report`。
+- 每日先查 `/v2/bench/status`，确认 `state=idle` 后再运行 `/v2/bench/run`；内置默认 case 默认只做诊断，不覆盖 latest，fixture/custom case 的 `status=complete` 报告才可作为 latest 指标。
 - 推荐使用统一 smoke 命令串联 fixture、seed、bench 和 gray status：
 
 ```bash
@@ -88,7 +88,7 @@ pnpm v2:gray-smoke -- --agent-id development --project-id openclaw-memory-fabric
 - 使用 `POST /v2/bench/fixtures` 保存 fixture 文件；`mode=append` 用于持续补 case，`mode=replace` 用于重建基线。
 - 使用 `POST /v2/bench/seed` + `useFixtures=true` 做 fixture seed：先写 L0 events，再写 candidates，再运行 consolidator；重复执行必须跳过已存在 fixture。
 - 使用 `POST /v2/bench/run` + `useFixtures=true` 固定输出 Recall@5、Injection Precision、Stale Rate、Source Coverage、平均注入 token、P95 latency。
-- 每次实现变更后运行同一 fixture，避免空库指标误导。
+- 每次实现变更后运行同一 fixture，避免空库指标误导；`0-case`、`partial`、`failed` report 不进入 latest 验收。
 
 命令行保存并执行 fixture：
 
@@ -163,6 +163,7 @@ pnpm v2:gray-smoke -- \
 - `POST /v2/bench/fixtures`
 - `POST /v2/bench/seed`
 - `POST /v2/bench/run`
+- `GET /v2/bench/status`
 - `GET /v2/bench/report`
 - `pnpm v2:gray-smoke -- ...`
 - `pnpm v2:canary-monitor -- ...`

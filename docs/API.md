@@ -451,18 +451,42 @@ Query:
 
 ### POST /v2/bench/run
 
-运行 Memory Bench v0，可传自定义 cases，或使用已保存的 fixture 文件。
+运行 Memory Bench v0，可传自定义 cases，或使用已保存的 fixture 文件。接口带运行锁：已有 bench 正在运行时返回 `409` 和 `activeRun`，避免重复触发长任务。
 
 ```json
 {
   "agentId": "development",
   "projectId": "openclaw-memory-fabric",
   "useFixtures": true,
-  "limit": 50
+  "limit": 50,
+  "caseTimeoutMs": 5000,
+  "totalTimeoutMs": 60000,
+  "persist": true
 }
 ```
 
-`useFixtures=false` 且未传 `cases` 时使用内置默认 v0 cases。
+`useFixtures=false` 且未传 `cases` 时使用内置默认 v0 cases；这种默认运行视为诊断，默认 `persist=false`，不会覆盖 latest。传入自定义 `cases` 或 `useFixtures=true` 时默认 `persist=true`，也可显式传 `persist=false` 做只读诊断。
+
+报告字段包含：
+
+- `status=complete|partial|failed`
+- `completedCases`
+- `timedOutCases`
+- `errorCount`
+- `errors`
+- `durationMs`
+
+只有 `status=complete` 且 `cases > 0` 的报告会写入 latest report；`0-case`、`partial`、`failed` 只返回给调用方，不覆盖已有验收指标。
+
+### GET /v2/bench/status
+
+读取 Bench 运行状态和 latest report 摘要。
+
+Response:
+
+- `state=idle|running`
+- `activeRun`：运行中时包含 `runId`、`startedAt`、`casesTotal`、`casesCompleted`、`lastCaseId`、`caseTimeoutMs`、`totalTimeoutMs`
+- `latestReport`：latest report 的轻量摘要，供 Inspector 展示运行态和质量门槛
 
 ### POST /v2/bench/seed
 

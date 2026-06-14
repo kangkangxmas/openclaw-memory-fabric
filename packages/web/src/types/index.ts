@@ -339,19 +339,59 @@ export interface V2Relation {
 
 export interface V2BenchReport {
   generatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  status?: "complete" | "partial" | "failed";
   cases: number;
+  completedCases?: number;
+  timedOutCases?: number;
+  errorCount?: number;
   recallAt5: number;
   injectionPrecision: number;
   staleRate: number;
   sourceCoverage: number;
   avgCardChars: number;
   p95LatencyMs: number;
+  errors?: Array<{
+    id: string;
+    message: string;
+  }>;
   results: Array<{
     id: string;
     hit: boolean;
     cardCount: number;
     latencyMs: number;
+    status?: "pass" | "miss" | "timeout" | "error";
+    error?: string;
   }>;
+}
+
+export interface V2BenchActiveRun {
+  runId: string;
+  state: "running";
+  startedAt: string;
+  casesTotal: number;
+  casesCompleted: number;
+  caseTimeoutMs: number;
+  totalTimeoutMs: number;
+  lastCaseId?: string;
+}
+
+export interface V2BenchStatus {
+  ok: boolean;
+  state: "idle" | "running";
+  activeRun?: V2BenchActiveRun;
+  latestReport: {
+    generatedAt: string;
+    status: "complete" | "partial" | "failed";
+    cases: number;
+    completedCases: number;
+    recallAt5: number;
+    injectionPrecision: number;
+    sourceCoverage: number;
+    p95LatencyMs: number;
+  } | null;
 }
 
 export interface V2BenchCase {

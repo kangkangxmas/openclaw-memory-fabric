@@ -336,11 +336,8 @@ export class MemoryCoreV2 {
     // Load all candidate entries
     let candidates: MemoryEntryV2[] = [];
     if (candidateIds !== undefined && candidateIds.length > 0) {
-      // Load only indexed entries
-      for (const id of candidateIds) {
-        const entry = await this.read(id);
-        if (entry) candidates.push(entry);
-      }
+      candidates = this.index.entriesByIds(candidateIds);
+      this.cache.preload(candidates);
     } else if (candidateIds !== undefined) {
       candidates = [];
     } else if (opts.scope) {
@@ -662,6 +659,9 @@ export class MemoryCoreV2 {
     if (idx >= 0) {
       entries[idx] = entry;
       await this.saveScope(scope, entries);
+      this.index.update(entry);
+      this.cache.setEntry(entry.id, entry);
+      this.cache.invalidateQueryCaches();
     }
   }
 

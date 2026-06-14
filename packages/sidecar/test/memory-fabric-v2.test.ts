@@ -736,11 +736,18 @@ describe("Memory Fabric V2", () => {
     });
     const benchBody = JSON.parse(benchRes.body);
     expect(benchBody.report.cases).toBe(1);
+    expect(benchBody.report.status).toBe("complete");
     expect(benchBody.report.recallAt5).toBeGreaterThanOrEqual(0);
 
     const latestBenchRes = await app.inject({ method: "GET", url: "/v2/bench/report" });
     const latestBenchBody = JSON.parse(latestBenchRes.body);
     expect(latestBenchBody.report.cases).toBe(1);
+
+    const benchStatusRes = await app.inject({ method: "GET", url: "/v2/bench/status" });
+    const benchStatusBody = JSON.parse(benchStatusRes.body);
+    expect(benchStatusBody.state).toBe("idle");
+    expect(benchStatusBody.latestReport.cases).toBe(1);
+    expect(benchStatusBody.latestReport.status).toBe("complete");
 
     const emptyFixtureBenchRes = await app.inject({
       method: "POST",
@@ -843,6 +850,7 @@ describe("Memory Fabric V2", () => {
     });
     const fixtureBenchBody = JSON.parse(fixtureBenchRes.body);
     expect(fixtureBenchBody.report.cases).toBe(1);
+    expect(fixtureBenchBody.report.status).toBe("complete");
 
     const grayStatusRes = await app.inject({
       method: "GET",
