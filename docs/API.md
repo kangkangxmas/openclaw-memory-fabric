@@ -437,6 +437,16 @@ Query:
 
 查看 projection apply/rollback 历史。
 
+### GET /v2/carriers/projection/policy
+
+查看 Carrier Projection 治理策略。Response 包含：
+
+- `projectionVersion`
+- `schemaWhitelist`
+- `ownershipRules`
+
+Inspector 使用该接口展示允许投影的 carrier 文件、section ownership 和可回滚策略。
+
 ### GET /v2/graph/relations
 
 查询 v2 语义关系图。
@@ -543,9 +553,79 @@ Response:
 
 `mode=append` 时按 `id` 去重并覆盖同 id case；`mode=replace` 会替换整个 fixture 文件。
 
+### POST /v2/bench/fixtures/cleanup
+
+清理 Bench fixture 数据。用于把 `bench_fixture` 标记的稳定 memory 和 candidate 从常规运维视图中移除，并可选清空持久化 fixture 文件。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "clearFixtures": true,
+  "rejectCandidates": true,
+  "deleteMemories": true,
+  "limit": 2000
+}
+```
+
+Response 包含 `memoryDeleted`、`candidatesRejected` 和 `fixturesCleared`。清理稳定 memory 时会同时使用 promoted candidate 反查和 fresh core tag 扫描，避免运行中索引缓存漏掉 fixture memory。
+
 ### GET /v2/bench/report
 
 读取最新一次 Bench report。
+
+### GET /v2/ops/acceptance/status
+
+V2 Acceptance 运维状态。Response 包含验收目标、latest bench report、fixture scopes、seeded fixture candidate/memory 数和当前失败项。该接口用于判断是否可以继续扩大灰度。
+
+### POST /v2/ops/acceptance/run
+
+运行生产验收 Bench。可选 `seed=true` 先把持久化 fixtures 灌入稳定库，再运行 fixture bench。
+
+```json
+{
+  "seed": true,
+  "limit": 50,
+  "caseTimeoutMs": 5000,
+  "totalTimeoutMs": 60000
+}
+```
+
+### GET /v2/ops/evidence-audit
+
+按 Agent/Project 扫描稳定 v2 memories 的证据覆盖率，返回 source-backed/source-less 数量、按 type 聚合和 source-less samples。该接口只读，不修改 memory。
+
+Query:
+
+- `agentId`
+- `projectId`
+- `type`
+- `limit`
+
+### GET /v2/ops/sensitive-candidates
+
+扫描 candidate queue 中可能包含凭据、数据库连接信息、DSN 或 user/password 的候选记忆。Response 只返回 candidateId、reason、type、status、sourceRefs 数量和 promotedMemoryId，不返回原始 content。
+
+Query:
+
+- `agentId`
+- `projectId`
+- `status=pending,needs_review,rejected,promoted`
+- `limit`
+
+### POST /v2/ops/sensitive-candidates/reject
+
+批量 reject 当前扫描命中的敏感候选，并可选删除已经 promoted 的稳定 memory。
+
+```json
+{
+  "agentId": "development",
+  "projectId": "openclaw-memory-fabric",
+  "statuses": ["pending", "needs_review", "promoted"],
+  "deletePromotedMemories": true,
+  "limit": 500
+}
+```
 
 ### v2 gray smoke 脚本
 

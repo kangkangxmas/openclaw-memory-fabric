@@ -140,6 +140,13 @@ export class MemoryCoreV2 {
     this.cache = new MemoryCache();
   }
 
+  /** Clear in-memory index/cache so subsequent queries include external writes. */
+  refresh(): void {
+    this.index.clear();
+    this.cache.clear();
+    this.indexBuilt = false;
+  }
+
   // -------------------------------------------------------------------------
   // CRUD Operations
   // -------------------------------------------------------------------------

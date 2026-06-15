@@ -23,20 +23,25 @@ import type {
   V2TraceResponse,
   V2CarrierDriftReport,
   V2CarrierProjectionRecord,
+  V2CarrierProjectionPolicy,
   V2Candidate,
   V2CandidateStats,
   V2ConsolidationStatus,
+  V2AcceptanceStatus,
   V2BenchCase,
+  V2BenchFixtureCleanupResult,
   V2BenchFixtureSet,
   V2BenchReport,
   V2BenchSeedResult,
   V2BenchStatus,
   V2CanaryStatus,
   V2ContextHealthReport,
+  V2EvidenceAuditReport,
   V2GrayStatus,
   V2Mode,
   V2Relation,
   V2RolloutModesResponse,
+  V2SensitiveCandidateReport,
 } from "../types";
 
 function resolveApiBase(): string {
@@ -227,6 +232,18 @@ export const api = {
       projectionId,
     }),
 
+  getV2CarrierProjectionHistory: (agentId?: string, projectId?: string, limit = 20) =>
+    get<{ ok: boolean; history: V2CarrierProjectionRecord[]; count: number }>(
+      `/v2/carriers/projection/history${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+        `limit=${encodeURIComponent(String(limit))}`,
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
+
+  getV2CarrierProjectionPolicy: () =>
+    get<{ ok: boolean; policy: V2CarrierProjectionPolicy }>("/v2/carriers/projection/policy"),
+
   getV2GraphRelations: (agentId?: string, projectId?: string, memoryId?: string) =>
     get<{ ok: boolean; relations: V2Relation[]; count: number }>(
       `/v2/graph/relations${[
@@ -264,6 +281,14 @@ export const api = {
       useFixtures,
     }),
 
+  cleanupV2BenchFixtures: (opts?: {
+    agentId?: string;
+    projectId?: string;
+    clearFixtures?: boolean;
+    rejectCandidates?: boolean;
+    deleteMemories?: boolean;
+  }) => post<V2BenchFixtureCleanupResult>("/v2/bench/fixtures/cleanup", opts ?? {}),
+
   getV2GrayStatus: (agentId?: string, projectId?: string) =>
     get<V2GrayStatus>(
       `/v2/gray/status${[
@@ -286,6 +311,36 @@ export const api = {
     ),
 
   getV2ContextHealth: () => get<{ ok: boolean; report: V2ContextHealthReport }>("/v2/context/health"),
+
+  getV2EvidenceAudit: (agentId?: string, projectId?: string, limit = 500) =>
+    get<V2EvidenceAuditReport>(
+      `/v2/ops/evidence-audit${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+        `limit=${encodeURIComponent(String(limit))}`,
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
+
+  getV2SensitiveCandidates: (agentId?: string, projectId?: string, limit = 10_000) =>
+    get<V2SensitiveCandidateReport>(
+      `/v2/ops/sensitive-candidates${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+        `limit=${encodeURIComponent(String(limit))}`,
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
+
+  rejectV2SensitiveCandidates: (agentId?: string, projectId?: string, deletePromotedMemories = true) =>
+    post<{ ok: boolean; checked: number; rejected: number; deletedMemories: number }>("/v2/ops/sensitive-candidates/reject", {
+      agentId,
+      projectId,
+      deletePromotedMemories,
+    }),
+
+  getV2AcceptanceStatus: () => get<V2AcceptanceStatus>("/v2/ops/acceptance/status"),
+
+  postV2AcceptanceRun: (opts?: { seed?: boolean; limit?: number; caseTimeoutMs?: number; totalTimeoutMs?: number }) =>
+    post<{ ok: boolean; seed?: V2BenchSeedResult; report: V2BenchReport; failures: string[] }>("/v2/ops/acceptance/run", opts ?? {}),
 
   getV2RolloutModes: (opts?: {
     agentIds?: string[];

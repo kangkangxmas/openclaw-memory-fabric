@@ -232,7 +232,9 @@ pnpm v2:canary-monitor -- \
 - Bench seed / fixture seed 已从顶部主操作移到 Bench Tools，降低误写真实 Agent 的风险。
 - 详细 Web 审计和后续优化项见 `docs/web-v2-inspector-audit.md`。
 
-第 4 项（Carrier 投影治理）建议在 Inspector 可解释性可用后启动；不要早于 Source Trace / Candidate Review。进入条件：
+第 4 项（Carrier 投影治理）基础能力已启动：Inspector 已能展示 projection policy、schema whitelist、projection history，并可对历史 projection 执行 rollback。下一步不再扩展任意写入面，而是把 apply/rollback 升级为 patch diff 审阅。
+
+继续增强 Carrier 投影治理前应满足：
 
 - v2-write canary 连续 48 小时没有 pending/needs_review 堆积。
 - Source Trace 能确认稳定 memory 都能追到 L0 event。

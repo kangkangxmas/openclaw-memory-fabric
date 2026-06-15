@@ -2,23 +2,28 @@ import { useEffect, useMemo, useState } from "react";
 import type { AppContext } from "../App";
 import type {
   MemoryCard,
+  V2AcceptanceStatus,
   V2BenchFixtureSet,
+  V2BenchFixtureCleanupResult,
   V2BenchReport,
   V2BenchSeedResult,
   V2BenchStatus,
   V2CanaryStatus,
   V2CarrierDriftReport,
   V2CarrierProjectionRecord,
+  V2CarrierProjectionPolicy,
   V2Candidate,
   V2CandidateStats,
   V2ConsolidationStatus,
   V2ContextHealthReport,
+  V2EvidenceAuditReport,
   V2GrayStatus,
   V2Mode,
   V2RecallAuditEntry,
   V2RecallPlanResponse,
   V2RolloutModeRow,
   V2RolloutModesResponse,
+  V2SensitiveCandidateReport,
   V2TraceResponse,
 } from "../types";
 import { api } from "../api/client";
@@ -146,6 +151,12 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const [bench, setBench] = useState<V2BenchReport | null>(null);
   const [benchStatus, setBenchStatus] = useState<V2BenchStatus | null>(null);
   const [fixtures, setFixtures] = useState<V2BenchFixtureSet | null>(null);
+  const [acceptance, setAcceptance] = useState<V2AcceptanceStatus | null>(null);
+  const [fixtureCleanup, setFixtureCleanup] = useState<V2BenchFixtureCleanupResult | null>(null);
+  const [sensitiveReport, setSensitiveReport] = useState<V2SensitiveCandidateReport | null>(null);
+  const [evidenceAudit, setEvidenceAudit] = useState<V2EvidenceAuditReport | null>(null);
+  const [projectionHistory, setProjectionHistory] = useState<V2CarrierProjectionRecord[]>([]);
+  const [projectionPolicy, setProjectionPolicy] = useState<V2CarrierProjectionPolicy | null>(null);
   const [seed, setSeed] = useState<V2BenchSeedResult | null>(null);
   const [gray, setGray] = useState<V2GrayStatus | null>(null);
   const [canary, setCanary] = useState<V2CanaryStatus | null>(null);
@@ -255,7 +266,22 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     const agentId = ctx.agentId || undefined;
     const projectId = ctx.projectId || undefined;
     const rolloutScopes = await loadRolloutScopes();
-    const [candidateRes, statusRes, grayRes, fixtureRes, benchStatusRes, auditRes, canaryRes, contextHealthRes, rolloutRes] = await Promise.all([
+    const [
+      candidateRes,
+      statusRes,
+      grayRes,
+      fixtureRes,
+      benchStatusRes,
+      auditRes,
+      canaryRes,
+      contextHealthRes,
+      rolloutRes,
+      acceptanceRes,
+      sensitiveRes,
+      evidenceRes,
+      projectionHistoryRes,
+      projectionPolicyRes,
+    ] = await Promise.all([
       api.getV2Candidates(agentId, projectId),
       api.getV2ConsolidationStatus(agentId, projectId),
       api.getV2GrayStatus(agentId, projectId),
@@ -265,6 +291,11 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       api.getV2CanaryStatus({ agentId: CANARY_AGENT_ID, projectId: CANARY_PROJECT_ID, expectedMode: CANARY_EXPECTED_MODE }),
       api.getV2ContextHealth(),
       api.getV2RolloutModes({ scopes: rolloutScopes, agentId, projectId }),
+      api.getV2AcceptanceStatus(),
+      api.getV2SensitiveCandidates(agentId, projectId),
+      api.getV2EvidenceAudit(agentId, projectId),
+      api.getV2CarrierProjectionHistory(agentId, projectId, 10),
+      api.getV2CarrierProjectionPolicy(),
     ]);
     setCandidates(candidateRes.candidates);
     setCandidateStats(statusRes.candidateStats);
@@ -276,6 +307,11 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setCanary(canaryRes);
     setContextHealth(contextHealthRes.report);
     setRollout(rolloutRes);
+    setAcceptance(acceptanceRes);
+    setSensitiveReport(sensitiveRes);
+    setEvidenceAudit(evidenceRes);
+    setProjectionHistory(projectionHistoryRes.history);
+    setProjectionPolicy(projectionPolicyRes.policy);
     setModeDrafts((prev) => {
       const next = { ...prev };
       for (const row of rolloutRes.modes) {
@@ -404,6 +440,15 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     const res = await api.rollbackV2CarrierProjection(projection.projectionId);
     setProjection(res.projection);
     await loadDrift();
+    setProjectionHistory((await api.getV2CarrierProjectionHistory(ctx.agentId || undefined, ctx.projectId || undefined, 10)).history);
+  };
+
+  const rollbackProjectionRecord = async (record: V2CarrierProjectionRecord) => {
+    if (!window.confirm(`${t("v2.confirm.rollbackProjection")}\n${record.projectionId}`)) return;
+    const res = await api.rollbackV2CarrierProjection(record.projectionId);
+    setProjection(res.projection);
+    await loadDrift();
+    setProjectionHistory((await api.getV2CarrierProjectionHistory(ctx.agentId || undefined, ctx.projectId || undefined, 10)).history);
   };
 
   const loadBench = async () => {
@@ -432,6 +477,21 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setBenchStatus(await api.getV2BenchStatus());
   };
 
+  const runAcceptanceOps = async (seedFixtures: boolean) => {
+    if (!window.confirm(seedFixtures ? t("v2.confirm.runAcceptanceSeeded") : t("v2.confirm.runFixtureBench"))) return;
+    const res = await api.postV2AcceptanceRun({
+      seed: seedFixtures,
+      limit: 50,
+      caseTimeoutMs: 5000,
+      totalTimeoutMs: 60000,
+    });
+    setBench(res.report);
+    if (res.seed) setSeed(res.seed);
+    const [statusRes, acceptanceRes] = await Promise.all([api.getV2BenchStatus(), api.getV2AcceptanceStatus()]);
+    setBenchStatus(statusRes);
+    setAcceptance(acceptanceRes);
+  };
+
   const loadLatestBench = async () => {
     const [res, statusRes] = await Promise.all([api.getV2BenchReport(), api.getV2BenchStatus()]);
     setBench(res.report);
@@ -444,6 +504,23 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       ? await api.postV2BenchSeed(undefined, undefined, true)
       : await api.postV2BenchSeed(ctx.agentId || undefined, ctx.projectId || undefined, false);
     setSeed(res.result);
+    await loadOps();
+  };
+
+  const cleanupFixtures = async (clearFixtureFile: boolean) => {
+    if (!window.confirm(clearFixtureFile ? t("v2.confirm.cleanupFixturesAll") : t("v2.confirm.cleanupFixturesSeeded"))) return;
+    const res = await api.cleanupV2BenchFixtures({
+      clearFixtures: clearFixtureFile,
+      rejectCandidates: true,
+      deleteMemories: true,
+    });
+    setFixtureCleanup(res);
+    await loadOps();
+  };
+
+  const rejectSensitiveCandidates = async () => {
+    if (!window.confirm(t("v2.confirm.rejectSensitive"))) return;
+    await api.rejectV2SensitiveCandidates(ctx.agentId || undefined, ctx.projectId || undefined, true);
     await loadOps();
   };
 
@@ -871,6 +948,170 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             {t("v2.attention")}: {failingChecks.map((check) => `${check.id}=${check.status}`).join(", ")}
           </div>
         )}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-3">
+        <div className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-bold text-ink">{t("v2.acceptanceOps.title")}</h2>
+                <CompactBadge status={acceptance?.ready ? "ready" : "warn"}>{acceptance?.ready ? "ready" : "needs check"}</CompactBadge>
+              </div>
+              <div className="mt-1 text-xs text-muted">{t("v2.acceptanceOps.desc")}</div>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Metric label="Fixtures" value={acceptance?.fixtures.count ?? fixtures?.count ?? 0} />
+            <Metric label="Seeded" value={acceptance?.seeded.memoryCount ?? "-"} />
+            <Metric label="Recall@5" value={acceptance?.latestReport ? pct(acceptance.latestReport.recallAt5) : "-"} />
+            <Metric label="Precision" value={acceptance?.latestReport ? pct(acceptance.latestReport.injectionPrecision) : "-"} />
+          </div>
+          {acceptance && acceptance.fixtures.scopes.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1">
+              {acceptance.fixtures.scopes.map((scope) => (
+                <CompactBadge key={`${scope.agentId}/${scope.projectId ?? ""}`}>
+                  {scope.agentId}/{scope.projectId ?? "*"} · {scope.cases}
+                </CompactBadge>
+              ))}
+            </div>
+          )}
+          {acceptance && acceptance.failures.length > 0 && (
+            <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+              {acceptance.failures.slice(0, 4).join(" · ")}
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => void run("acceptance-run", () => runAcceptanceOps(false))}
+              disabled={!!loading || benchRunning}
+              className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs disabled:opacity-50"
+            >
+              {t("v2.acceptanceOps.run")}
+            </button>
+            <button
+              onClick={() => void run("acceptance-seed-run", () => runAcceptanceOps(true))}
+              disabled={!!loading || benchRunning}
+              className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
+            >
+              {t("v2.acceptanceOps.seedRun")}
+            </button>
+            <button
+              onClick={() => void run("fixture-cleanup", () => cleanupFixtures(false))}
+              disabled={!!loading}
+              className="px-3 py-1.5 border border-amber-400/40 rounded-lg text-xs text-amber-200 disabled:opacity-50"
+            >
+              {t("v2.acceptanceOps.cleanupSeeded")}
+            </button>
+            <button
+              onClick={() => void run("fixture-clear", () => cleanupFixtures(true))}
+              disabled={!!loading}
+              className="px-3 py-1.5 border border-red-400/40 rounded-lg text-xs text-red-200 disabled:opacity-50"
+            >
+              {t("v2.acceptanceOps.clearAll")}
+            </button>
+          </div>
+          {fixtureCleanup && (
+            <div className="mt-3 rounded-lg bg-deep px-3 py-2 text-xs text-muted">
+              deleted {fixtureCleanup.memoryDeleted} memories · rejected {fixtureCleanup.candidatesRejected} candidates · fixtures {fixtureCleanup.fixturesCleared ? "cleared" : "kept"}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-bold text-ink">{t("v2.safety.title")}</h2>
+                <CompactBadge status={(sensitiveReport?.count ?? 0) > 0 ? "fail" : "ready"}>
+                  {sensitiveReport?.count ?? 0} sensitive
+                </CompactBadge>
+              </div>
+              <div className="mt-1 text-xs text-muted">{t("v2.safety.desc")}</div>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Metric label="Checked" value={sensitiveReport?.checked ?? "-"} />
+            <Metric label="Sensitive" value={sensitiveReport?.count ?? "-"} />
+            <Metric label="Evidence" value={evidenceAudit ? pct(evidenceAudit.sourceCoverage) : "-"} />
+            <Metric label="Source-less" value={evidenceAudit?.sourceLess ?? "-"} />
+          </div>
+          {sensitiveReport && Object.keys(sensitiveReport.byReason).length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1">
+              {Object.entries(sensitiveReport.byReason).map(([reason, count]) => (
+                <CompactBadge key={reason} status="fail">{reason}: {count}</CompactBadge>
+              ))}
+            </div>
+          )}
+          {evidenceAudit && evidenceAudit.samples.length > 0 && (
+            <div className="mt-3 max-h-24 overflow-auto rounded-lg border border-line bg-deep px-3 py-2 text-xs text-muted">
+              {evidenceAudit.samples.slice(0, 4).map((sample) => (
+                <div key={sample.memoryId} className="mb-1">
+                  <span className="font-mono text-ink">{sample.memoryId}</span> · {sample.type} · {clip(sample.contentPreview, 80)}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => void run("ops", loadOps)}
+              disabled={!!loading}
+              className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
+            >
+              {t("common.refresh")}
+            </button>
+            <button
+              onClick={() => void run("sensitive-reject", rejectSensitiveCandidates)}
+              disabled={!!loading || !sensitiveReport || sensitiveReport.count === 0}
+              className="px-3 py-1.5 border border-red-400/40 rounded-lg text-xs text-red-200 disabled:opacity-50"
+            >
+              {t("v2.safety.reject")}
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-bold text-ink">{t("v2.projectionOps.title")}</h2>
+                <CompactBadge>{projectionPolicy?.projectionVersion ?? "v2"}</CompactBadge>
+              </div>
+              <div className="mt-1 text-xs text-muted">{t("v2.projectionOps.desc")}</div>
+            </div>
+          </div>
+          <div className="mt-3 rounded-lg border border-line bg-deep px-3 py-2 text-xs text-muted">
+            <div className="font-bold text-ink">{t("v2.projectionOps.policy")}</div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {projectionPolicy?.schemaWhitelist.map((filename) => (
+                <CompactBadge key={filename}>{filename}</CompactBadge>
+              ))}
+            </div>
+          </div>
+          <div className="mt-3 max-h-36 overflow-auto space-y-2">
+            {projectionHistory.slice(0, 4).map((record) => (
+              <div key={record.projectionId} className="rounded-lg border border-line bg-deep px-3 py-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-ink">{record.projectionId}</span>
+                  <CompactBadge status={record.status}>{record.status}</CompactBadge>
+                </div>
+                <div className="mt-1 text-muted">{formatTime(record.appliedAt)} · merged {record.merged.length} · skipped {record.skipped.length}</div>
+                <button
+                  onClick={() => void run(`projection-rollback-${record.projectionId}`, () => rollbackProjectionRecord(record))}
+                  disabled={!!loading || record.status !== "applied"}
+                  className="mt-2 px-2 py-1 border border-line rounded text-xs text-ink disabled:opacity-40"
+                >
+                  {t("v2.rollout.rollback")}
+                </button>
+              </div>
+            ))}
+            {projectionHistory.length === 0 && (
+              <div className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-sm text-muted">
+                {t("common.empty")}
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[360px_1fr]">

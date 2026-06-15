@@ -77,6 +77,21 @@ export function registerV2Routes(
   const candidateStatuses: AtomicMemoryCandidate["status"][] = ["pending", "needs_review", "rejected", "promoted"];
   const relationTypes: V2RelationType[] = ["DECIDES", "IMPLEMENTS", "SUPERSEDES", "CAUSES", "VALIDATES", "CONSTRAINS"];
   const rolloutModes: V2Mode[] = ["off", "shadow", "v2-recall", "v2-write"];
+  const benchTargets = {
+    minCases: 30,
+    recallAt5: 0.85,
+    injectionPrecision: 0.8,
+    staleRate: 0.05,
+    sourceCoverage: 0.98,
+    p95LatencyMs: 300,
+  };
+  const sensitivePatterns: Array<{ id: string; pattern: RegExp }> = [
+    { id: "credential_keyword", pattern: /DB_PASS|DB_PASSWORD|PASSWORD|PASSWD|SECRET|TOKEN|密钥|口令|密码|access[_-]?key|api[_-]?key/i },
+    { id: "dsn_with_credentials", pattern: /\b(?:mysql|postgres(?:ql)?|mongodb|redis):\/\/[^/\s:@]+:[^@\s]+@/i },
+    { id: "host_port_database_login", pattern: /\b(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}\/[\w.-]+[,，]\s*[\w.-]+\/\S+/i },
+    { id: "user_password_pair", pattern: /\b(?:user|username|db_user|账号|用户名)\s*[:=]\s*\S+.*(?:pass|password|db_pass|密码|口令)\s*[:=]\s*\S+/i },
+    { id: "database_connection_info", pattern: /(?:数据库连接信息|database connection|db connection)/i },
+  ];
   const parseStatuses = (value?: string): AtomicMemoryCandidate["status"][] | undefined =>
     value
       ?.split(",")
@@ -103,6 +118,31 @@ export function registerV2Routes(
       const [agentId, projectId] = item.includes("::") ? item.split("::", 2) : item.split("/", 2);
       return { agentId, projectId: projectId || undefined };
     }).filter((scope) => Boolean(scope.agentId));
+  const sensitiveReason = (content: string): string | null => sensitivePatterns.find((item) => item.pattern.test(content))?.id ?? null;
+  const benchFailures = (report: Awaited<ReturnType<MemoryBenchRunner["latest"]>>): string[] => {
+    if (!report) return ["no_latest_report"];
+    const failures: string[] = [];
+    if (report.status !== "complete") failures.push(`status:${report.status}`);
+    if (report.cases < benchTargets.minCases) failures.push(`cases:${report.cases}<${benchTargets.minCases}`);
+    if (report.recallAt5 < benchTargets.recallAt5) failures.push(`recallAt5:${report.recallAt5}<${benchTargets.recallAt5}`);
+    if (report.injectionPrecision < benchTargets.injectionPrecision) failures.push(`injectionPrecision:${report.injectionPrecision}<${benchTargets.injectionPrecision}`);
+    if (report.staleRate > benchTargets.staleRate) failures.push(`staleRate:${report.staleRate}>${benchTargets.staleRate}`);
+    if (report.sourceCoverage < benchTargets.sourceCoverage) failures.push(`sourceCoverage:${report.sourceCoverage}<${benchTargets.sourceCoverage}`);
+    if (report.p95LatencyMs > benchTargets.p95LatencyMs) failures.push(`p95LatencyMs:${report.p95LatencyMs}>${benchTargets.p95LatencyMs}`);
+    return failures;
+  };
+  const fixtureScopes = (cases: MemoryBenchCase[]): Array<{ agentId: string; projectId?: string; cases: number }> => {
+    const scopes = new Map<string, { agentId: string; projectId?: string; cases: number }>();
+    for (const benchCase of cases) {
+      const agentId = benchCase.agentId ?? "development";
+      const projectId = benchCase.projectId;
+      const key = scopeKey(agentId, projectId);
+      const current = scopes.get(key) ?? { agentId, projectId, cases: 0 };
+      current.cases++;
+      scopes.set(key, current);
+    }
+    return [...scopes.values()].sort((a, b) => a.agentId.localeCompare(b.agentId) || (a.projectId ?? "").localeCompare(b.projectId ?? ""));
+  };
   const collectRolloutScopes = async (opts: { agentIds?: string; projectIds?: string; agentId?: string; projectId?: string; scopes?: string }) => {
     const scopes = new Map<string, { agentId: string; projectId?: string }>();
     const requestedAgents = splitList(opts.agentIds);
@@ -1064,6 +1104,13 @@ export function registerV2Routes(
     return { ok: true, history, count: history.length };
   });
 
+  app.get("/v2/carriers/projection/policy", async () => {
+    if (!projection) {
+      return { ok: false, error: "Carrier repository is not configured" };
+    }
+    return { ok: true, policy: projection.policy() };
+  });
+
   app.get<{
     Querystring: { agentId?: string; projectId?: string; type?: V2RelationType; memoryId?: string; limit?: number };
   }>("/v2/graph/relations", async (request) => {
@@ -1081,6 +1128,236 @@ export function registerV2Routes(
   app.get("/v2/context/health", async () => {
     const report = await contextHealth.report();
     return { ok: true, report };
+  });
+
+  app.get<{
+    Querystring: { agentId?: string; projectId?: string; limit?: number };
+  }>("/v2/ops/evidence-audit", async (request) => {
+    const limit = Math.max(1, Math.min(Number(request.query.limit ?? 500), 2000));
+    const result = await core.query({
+      agentId: request.query.agentId,
+      projectId: request.query.projectId,
+      includeExpired: false,
+      limit,
+    });
+    const sourceLess = result.entries.filter((entry) => (entry.sourceRefs?.length ?? 0) === 0 && (entry.sources?.length ?? 0) === 0);
+    const sourceBacked = result.entries.length - sourceLess.length;
+    const byType: Record<string, { total: number; sourceLess: number }> = {};
+    for (const entry of result.entries) {
+      byType[entry.type] ??= { total: 0, sourceLess: 0 };
+      byType[entry.type].total++;
+      if (sourceLess.includes(entry)) byType[entry.type].sourceLess++;
+    }
+    return {
+      ok: true,
+      agentId: request.query.agentId,
+      projectId: request.query.projectId,
+      checked: result.entries.length,
+      sourceBacked,
+      sourceLess: sourceLess.length,
+      sourceCoverage: result.entries.length > 0 ? sourceBacked / result.entries.length : 1,
+      byType,
+      samples: sourceLess.slice(0, 20).map((entry) => ({
+        memoryId: entry.id,
+        agentId: entry.agentId,
+        projectId: entry.projectId,
+        type: entry.type,
+        status: entry.status ?? "active",
+        contentPreview: entry.content.slice(0, 120),
+      })),
+    };
+  });
+
+  app.get<{
+    Querystring: { agentId?: string; projectId?: string; status?: string; limit?: number };
+  }>("/v2/ops/sensitive-candidates", async (request) => {
+    const candidates = await atomicStore.listAll({
+      agentId: request.query.agentId,
+      projectId: request.query.projectId,
+      statuses: parseStatuses(request.query.status),
+      limit: Number(request.query.limit ?? 10_000),
+    });
+    const matches = candidates
+      .map((candidate) => ({ candidate, reason: sensitiveReason(candidate.content) }))
+      .filter((item): item is { candidate: AtomicMemoryCandidate; reason: string } => !!item.reason);
+    const byReason: Record<string, number> = {};
+    const byStatus: Partial<Record<AtomicMemoryCandidate["status"], number>> = {};
+    for (const match of matches) {
+      byReason[match.reason] = (byReason[match.reason] ?? 0) + 1;
+      byStatus[match.candidate.status] = (byStatus[match.candidate.status] ?? 0) + 1;
+    }
+    return {
+      ok: true,
+      checked: candidates.length,
+      count: matches.length,
+      byReason,
+      byStatus,
+      samples: matches.slice(0, 25).map((match) => ({
+        candidateId: match.candidate.candidateId,
+        agentId: match.candidate.agentId,
+        projectId: match.candidate.projectId,
+        status: match.candidate.status,
+        type: match.candidate.type,
+        reason: match.reason,
+        promotedMemoryId: match.candidate.promotedMemoryId,
+      })),
+    };
+  });
+
+  app.post<{
+    Body: { agentId?: string; projectId?: string; status?: string[]; limit?: number; deletePromotedMemories?: boolean };
+  }>("/v2/ops/sensitive-candidates/reject", async (request) => {
+    const statuses = request.body.status?.filter((item): item is AtomicMemoryCandidate["status"] =>
+      candidateStatuses.includes(item as AtomicMemoryCandidate["status"])
+    );
+    const candidates = await atomicStore.listAll({
+      agentId: request.body.agentId,
+      projectId: request.body.projectId,
+      statuses,
+      limit: request.body.limit ?? 10_000,
+    });
+    let rejected = 0;
+    let deletedMemories = 0;
+    const affected: Array<{ candidateId: string; reason: string; promotedMemoryId?: string }> = [];
+    for (const candidate of candidates) {
+      const reason = sensitiveReason(candidate.content);
+      if (!reason) continue;
+      const updated = await atomicStore.review({
+        candidateId: candidate.candidateId,
+        agentId: candidate.agentId,
+        decision: "reject",
+        reviewedBy: "inspector",
+        reason: `sensitive_candidate:${reason}`,
+      });
+      if (updated) rejected++;
+      if (request.body.deletePromotedMemories && candidate.promotedMemoryId && await core.delete(candidate.promotedMemoryId)) {
+        deletedMemories++;
+      }
+      affected.push({ candidateId: candidate.candidateId, reason, promotedMemoryId: candidate.promotedMemoryId });
+    }
+    return { ok: true, checked: candidates.length, rejected, deletedMemories, affected };
+  });
+
+  app.get("/v2/ops/acceptance/status", async () => {
+    const freshCore = new MemoryCoreV2(cfg);
+    const [fixtures, latestBench, fixtureCandidates, fixtureMemories] = await Promise.all([
+      benchRunner.fixtures(),
+      benchRunner.latest(),
+      atomicStore.listAll({ limit: 10_000 }),
+      freshCore.query({ tags: ["bench_fixture"], includeExpired: false, limit: 2000 }),
+    ]);
+    const benchFixtureCandidates = fixtureCandidates.filter((candidate) => candidate.tags.some((tag) => tag.startsWith("bench_fixture")));
+    const promotedFixtureMemoryIds = new Set(
+      benchFixtureCandidates
+        .map((candidate) => candidate.promotedMemoryId)
+        .filter((memoryId): memoryId is string => !!memoryId)
+    );
+    const failures = benchFailures(latestBench);
+    return {
+      ok: true,
+      targets: benchTargets,
+      ready: failures.length === 0,
+      failures,
+      latestReport: latestBench,
+      fixtures: {
+        source: fixtures.source,
+        count: fixtures.count,
+        scopes: fixtureScopes(fixtures.cases),
+        sampleIds: fixtures.cases.slice(0, 20).map((benchCase) => benchCase.id),
+      },
+      seeded: {
+        candidateCount: benchFixtureCandidates.length,
+        memoryCount: Math.max(promotedFixtureMemoryIds.size, fixtureMemories.entries.length),
+        promotedCandidates: benchFixtureCandidates.filter((candidate) => candidate.status === "promoted").length,
+      },
+    };
+  });
+
+  app.post<{
+    Body: { seed?: boolean; limit?: number; caseTimeoutMs?: number; totalTimeoutMs?: number };
+  }>("/v2/ops/acceptance/run", async (request, reply) => {
+    try {
+      const fixtures = await benchRunner.fixtures();
+      const requestedLimit = request.body.limit ?? (fixtures.count > 0 ? fixtures.count : 50);
+      const limit = Math.max(1, Math.min(Number(requestedLimit), 500));
+      const seed = request.body.seed
+        ? await benchSeeder.seed({
+            cases: fixtures.cases,
+            limit,
+          })
+        : undefined;
+      const report = await benchRunner.run({
+        useFixtures: true,
+        limit,
+        persist: true,
+        caseTimeoutMs: request.body.caseTimeoutMs,
+        totalTimeoutMs: request.body.totalTimeoutMs,
+      });
+      return { ok: true, seed, report, failures: benchFailures(report) };
+    } catch (error) {
+      if (error instanceof MemoryBenchAlreadyRunningError) {
+        return reply.status(409).send({
+          ok: false,
+          error: error.message,
+          activeRun: error.activeRun,
+        });
+      }
+      throw error;
+    }
+  });
+
+  app.post<{
+    Body: { agentId?: string; projectId?: string; clearFixtures?: boolean; rejectCandidates?: boolean; deleteMemories?: boolean; limit?: number };
+  }>("/v2/bench/fixtures/cleanup", async (request) => {
+    const limit = Math.max(1, Math.min(Number(request.body.limit ?? 2000), 10_000));
+    let memoryDeleted = 0;
+    let candidatesRejected = 0;
+    let fixturesCleared = false;
+    const candidates = await atomicStore.listAll({
+      agentId: request.body.agentId,
+      projectId: request.body.projectId,
+      limit,
+    });
+    const fixtureCandidates = candidates.filter((candidate) => candidate.tags.some((tag) => tag.startsWith("bench_fixture")));
+    if (request.body.deleteMemories ?? true) {
+      const freshCore = new MemoryCoreV2(cfg);
+      const deletedMemoryIds = new Set<string>();
+      for (const candidate of fixtureCandidates) {
+        if (!candidate.promotedMemoryId || deletedMemoryIds.has(candidate.promotedMemoryId)) continue;
+        if (await freshCore.delete(candidate.promotedMemoryId)) {
+          deletedMemoryIds.add(candidate.promotedMemoryId);
+          memoryDeleted++;
+        }
+      }
+      const entries = await freshCore.query({
+        agentId: request.body.agentId,
+        projectId: request.body.projectId,
+        tags: ["bench_fixture"],
+        includeExpired: false,
+        limit,
+      });
+      for (const entry of entries.entries) {
+        if (deletedMemoryIds.has(entry.id)) continue;
+        if (await freshCore.delete(entry.id)) memoryDeleted++;
+      }
+    }
+    if (request.body.rejectCandidates ?? true) {
+      for (const candidate of fixtureCandidates) {
+        const updated = await atomicStore.review({
+          candidateId: candidate.candidateId,
+          agentId: candidate.agentId,
+          decision: "reject",
+          reviewedBy: "inspector",
+          reason: "bench_fixture_cleanup",
+        });
+        if (updated) candidatesRejected++;
+      }
+    }
+    if (request.body.clearFixtures) {
+      await benchRunner.saveFixtures({ cases: [], mode: "replace" });
+      fixturesCleared = true;
+    }
+    return { ok: true, memoryDeleted, candidatesRejected, fixturesCleared };
   });
 
   // -------------------------------------------------------------------------

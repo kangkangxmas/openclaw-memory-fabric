@@ -568,12 +568,19 @@ Memory Fabric 负责降低压缩后的二次污染风险：`before_prompt_build`
 | POST | `/v2/carriers/projection/apply` | 应用 Carrier projection | v2 Phase 3 |
 | POST | `/v2/carriers/projection/rollback` | 回滚 Carrier projection | v2 Phase 3 |
 | GET | `/v2/carriers/projection/history` | 查询 projection 历史 | v2 Phase 3 |
+| GET | `/v2/carriers/projection/policy` | 查询 projection schema whitelist 和 ownership rules | v2 Phase 3 |
 | GET | `/v2/graph/relations` | 查询语义关系图 | v2 Phase 4 |
 | GET | `/v2/bench/fixtures` | 读取持久化 Bench fixture 文件 | v2 Milestone B |
 | POST | `/v2/bench/fixtures` | 保存真实 Bench fixture cases | v2 Milestone B |
+| POST | `/v2/bench/fixtures/cleanup` | 清理 seeded Bench fixture memories/candidates | v2 Phase 5 |
 | POST | `/v2/bench/seed` | 灌入可重复 Bench fixture | v2 Milestone B |
 | POST | `/v2/bench/run` | 运行 Memory Bench | v2 Phase 5 |
 | GET | `/v2/bench/report` | 读取 latest Bench report | v2 Phase 5 |
+| GET | `/v2/ops/acceptance/status` | V2 验收状态和 fixture/bench readiness | v2 Phase 5 |
+| POST | `/v2/ops/acceptance/run` | 运行 fixture-backed acceptance bench | v2 Phase 5 |
+| GET | `/v2/ops/evidence-audit` | 审计 stable memories source coverage | v2 Ops |
+| GET | `/v2/ops/sensitive-candidates` | 扫描敏感候选但不回传原文 | v2 Ops |
+| POST | `/v2/ops/sensitive-candidates/reject` | 批量 reject 敏感候选并可删除 promoted memory | v2 Ops |
 
 ---
 

@@ -137,6 +137,12 @@ describe("Memory Fabric V2", () => {
       quality: { specificity: 1, actionability: 1, stability: 1, sourceCoverage: 0 },
     });
 
+    const preConsolidationRecall = await planner.recall({
+      agentId: "development",
+      projectId: "openclaw",
+      query: "为什么 Memory Fabric v2 不直接接入 Hy-Memory",
+      limit: 5,
+    });
     const consolidated = await consolidator.run({ agentId: "development", projectId: "openclaw" });
     const recall = await planner.recall({
       agentId: "development",
@@ -145,6 +151,7 @@ describe("Memory Fabric V2", () => {
       limit: 5,
     });
 
+    expect(preConsolidationRecall.cards).toHaveLength(0);
     expect(consolidated.promoted).toBe(2);
     expect(recall.plan.intent).toBe("decision_history");
     expect(recall.cards.length).toBeGreaterThan(0);
@@ -589,6 +596,14 @@ describe("Memory Fabric V2", () => {
     const carriers = new CarrierRepository(join(tmpRoot, "carriers"));
     registerV2Routes(app, cfg, carriers);
     await app.ready();
+    const core = new MemoryCoreV2(cfg);
+    await core.create({
+      agentId: "development",
+      projectId: "openclaw",
+      scope: "project",
+      type: "fact",
+      content: "legacy source-less fact for evidence audit",
+    });
 
     const eventRes = await app.inject({
       method: "POST",
@@ -720,6 +735,19 @@ describe("Memory Fabric V2", () => {
     const applyBody = JSON.parse(applyRes.body);
     expect(applyBody.projection.status).toBe("applied");
     expect(applyBody.projection.merged).toContain("decision-log.md");
+
+    const projectionHistoryRes = await app.inject({
+      method: "GET",
+      url: "/v2/carriers/projection/history?agentId=development&projectId=openclaw",
+    });
+    const projectionHistoryBody = JSON.parse(projectionHistoryRes.body);
+    expect(projectionHistoryBody.count).toBe(1);
+    expect(projectionHistoryBody.history[0].projectionId).toBe(applyBody.projection.projectionId);
+
+    const projectionPolicyRes = await app.inject({ method: "GET", url: "/v2/carriers/projection/policy" });
+    const projectionPolicyBody = JSON.parse(projectionPolicyRes.body);
+    expect(projectionPolicyBody.policy.schemaWhitelist).toContain("decision-log.md");
+    expect(projectionPolicyBody.policy.ownershipRules.some((rule: { filename: string }) => rule.filename === "self-model.md")).toBe(true);
 
     const rollbackRes = await app.inject({
       method: "POST",
@@ -912,6 +940,78 @@ describe("Memory Fabric V2", () => {
     const mixedFixtureBenchBody = JSON.parse(mixedFixtureBenchRes.body);
     expect(mixedFixtureBenchBody.report.cases).toBe(2);
     expect(mixedFixtureBenchBody.report.sourceCoverage).toBe(1);
+
+    const acceptanceStatusRes = await app.inject({ method: "GET", url: "/v2/ops/acceptance/status" });
+    const acceptanceStatusBody = JSON.parse(acceptanceStatusRes.body);
+    expect(acceptanceStatusBody.fixtures.count).toBe(2);
+    expect(acceptanceStatusBody.fixtures.scopes).toHaveLength(2);
+    expect(acceptanceStatusBody.seeded.memoryCount).toBeGreaterThanOrEqual(2);
+
+    const acceptanceRunRes = await app.inject({
+      method: "POST",
+      url: "/v2/ops/acceptance/run",
+      payload: { seed: false, limit: 2 },
+    });
+    const acceptanceRunBody = JSON.parse(acceptanceRunRes.body);
+    expect(acceptanceRunBody.report.cases).toBe(2);
+    expect(acceptanceRunBody.report.sourceCoverage).toBe(1);
+
+    const sensitiveCandidateRes = await app.inject({
+      method: "POST",
+      url: "/v2/memories/candidates",
+      payload: {
+        agentId: "development",
+        projectId: "openclaw",
+        candidates: [
+          {
+            type: "fact",
+            content: "数据库连接信息: 127.0.0.1:3306/app",
+            sourceRefs: [eventId],
+            confidence: 0.9,
+          },
+        ],
+      },
+    });
+    expect(sensitiveCandidateRes.statusCode).toBe(200);
+
+    const sensitiveReportRes = await app.inject({
+      method: "GET",
+      url: "/v2/ops/sensitive-candidates?agentId=development&projectId=openclaw",
+    });
+    const sensitiveReportBody = JSON.parse(sensitiveReportRes.body);
+    expect(sensitiveReportBody.count).toBe(1);
+    expect(sensitiveReportBody.byReason.database_connection_info).toBe(1);
+    expect(sensitiveReportBody.samples[0].content).toBeUndefined();
+
+    const rejectSensitiveRes = await app.inject({
+      method: "POST",
+      url: "/v2/ops/sensitive-candidates/reject",
+      payload: { agentId: "development", projectId: "openclaw" },
+    });
+    const rejectSensitiveBody = JSON.parse(rejectSensitiveRes.body);
+    expect(rejectSensitiveBody.rejected).toBe(1);
+
+    const evidenceAuditRes = await app.inject({
+      method: "GET",
+      url: "/v2/ops/evidence-audit?agentId=development&projectId=openclaw",
+    });
+    const evidenceAuditBody = JSON.parse(evidenceAuditRes.body);
+    expect(evidenceAuditBody.sourceLess).toBeGreaterThan(0);
+    expect(evidenceAuditBody.samples.some((sample: { contentPreview: string }) => sample.contentPreview.includes("legacy source-less"))).toBe(true);
+
+    const cleanupFixturesRes = await app.inject({
+      method: "POST",
+      url: "/v2/bench/fixtures/cleanup",
+      payload: { clearFixtures: true },
+    });
+    const cleanupFixturesBody = JSON.parse(cleanupFixturesRes.body);
+    expect(cleanupFixturesBody.memoryDeleted).toBeGreaterThanOrEqual(1);
+    expect(cleanupFixturesBody.candidatesRejected).toBeGreaterThanOrEqual(2);
+    expect(cleanupFixturesBody.fixturesCleared).toBe(true);
+
+    const fixturesAfterCleanupRes = await app.inject({ method: "GET", url: "/v2/bench/fixtures" });
+    const fixturesAfterCleanupBody = JSON.parse(fixturesAfterCleanupRes.body);
+    expect(fixturesAfterCleanupBody.count).toBe(0);
 
     const grayStatusRes = await app.inject({
       method: "GET",

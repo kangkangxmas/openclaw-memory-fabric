@@ -23,13 +23,16 @@
 - 所有会写入或回滚数据的高风险按钮增加二次确认：candidate approve/reject、candidate retry、projection apply/rollback、worker stop、bench seed/fixture seed。
 - Candidate Review 增加搜索、排序、失败原因聚合和 `POST /v2/memories/candidates/retry` 的受控入口；retry 仅覆盖 `needs_review/rejected`。
 - Source Trace 对缺失 `sourceRefs`、缺失 L0 events、`sourceRefs` 找不到 event、缺 source metadata、缺 relation trace 给出红色或黄色状态。
+- Acceptance Ops 增加验收目标、fixture scopes、latest bench readiness、fixture-backed acceptance run 和 seeded fixture cleanup。
+- Governance & Safety 增加 stable memory evidence audit、source-less samples、敏感 candidate 扫描和批量 reject；敏感扫描不回传原始 content。
+- Carrier Projection Governance 增加 policy 展示、schema whitelist、projection history 和 rollback 操作入口。
 
 ## 还需要优化的 Web 功能
 
 ### P0：灰度运维安全
 
-- 已完成：多 Agent 灰度配置、逐 scope 切换/回滚/Emergency Off、二次确认、固定运行上下文状态条、Candidate retry/搜索/排序/失败聚合、Source Trace 缺失证据状态。
-- 剩余：把 projection apply/rollback 从按钮确认升级为 patch diff 审阅；这应放入 Carrier 投影治理阶段统一实现。
+- 已完成：多 Agent 灰度配置、逐 scope 切换/回滚/Emergency Off、二次确认、固定运行上下文状态条、Candidate retry/搜索/排序/失败聚合、Source Trace 缺失证据状态、Acceptance Ops、敏感候选治理、evidence audit、Carrier projection policy/history/rollback。
+- 剩余：把 projection apply/rollback 从按钮确认升级为 patch diff 审阅。
 
 ### P1：可解释性与效率
 
@@ -49,4 +52,4 @@
 
 1. 先在棱镜 `product / Product` 继续跑 2-3 轮真实 v2-write 会话，用本页确认 canary warning 是否只剩真实 recall audit 流量不足。
 2. 使用多 Agent 灰度面板把第二个低风险 Agent 加入 `v2-recall`，观察 pending、needs_review、sourceRefs 覆盖率和 recall audit。
-3. 再启动第 4 项 Carrier 投影治理：等 Source Trace 能稳定解释 promoted memory 后，再把 projection apply/rollback 做成可审阅 patch diff。
+3. Carrier 投影治理基础已启动：先用 policy/history/rollback 保证可审计和可回滚；下一轮把 projection apply/rollback 做成可审阅 patch diff。

@@ -322,6 +322,16 @@ export interface V2CarrierProjectionRecord {
   skipped: string[];
 }
 
+export interface V2CarrierProjectionPolicy {
+  projectionVersion: string;
+  schemaWhitelist: string[];
+  ownershipRules: Array<{
+    filename: string;
+    accepts: string[];
+    requirement: string;
+  }>;
+}
+
 export interface V2Relation {
   relationId: string;
   agentId: string;
@@ -407,6 +417,75 @@ export interface V2BenchFixtureSet {
   source: "persisted" | "empty";
   cases: V2BenchCase[];
   count: number;
+}
+
+export interface V2AcceptanceStatus {
+  ok: boolean;
+  targets: {
+    minCases: number;
+    recallAt5: number;
+    injectionPrecision: number;
+    staleRate: number;
+    sourceCoverage: number;
+    p95LatencyMs: number;
+  };
+  ready: boolean;
+  failures: string[];
+  latestReport: V2BenchReport | null;
+  fixtures: {
+    source: "persisted" | "empty";
+    count: number;
+    scopes: Array<{ agentId: string; projectId?: string; cases: number }>;
+    sampleIds: string[];
+  };
+  seeded: {
+    candidateCount: number;
+    memoryCount: number;
+    promotedCandidates: number;
+  };
+}
+
+export interface V2SensitiveCandidateReport {
+  ok: boolean;
+  checked: number;
+  count: number;
+  byReason: Record<string, number>;
+  byStatus: Partial<Record<V2Candidate["status"], number>>;
+  samples: Array<{
+    candidateId: string;
+    agentId: string;
+    projectId?: string;
+    status: V2Candidate["status"];
+    type: string;
+    reason: string;
+    promotedMemoryId?: string;
+  }>;
+}
+
+export interface V2EvidenceAuditReport {
+  ok: boolean;
+  agentId?: string;
+  projectId?: string;
+  checked: number;
+  sourceBacked: number;
+  sourceLess: number;
+  sourceCoverage: number;
+  byType: Record<string, { total: number; sourceLess: number }>;
+  samples: Array<{
+    memoryId: string;
+    agentId: string;
+    projectId?: string;
+    type: string;
+    status: string;
+    contentPreview: string;
+  }>;
+}
+
+export interface V2BenchFixtureCleanupResult {
+  ok: boolean;
+  memoryDeleted: number;
+  candidatesRejected: number;
+  fixturesCleared: boolean;
 }
 
 export interface V2BenchSeedResult {

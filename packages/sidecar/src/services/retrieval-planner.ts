@@ -142,6 +142,7 @@ export class RetrievalPlanner {
 
   async recall(input: { query: string; agentId?: string; projectId?: string; scope?: "private" | "project" | "shared"; limit?: number }): Promise<RecallPlanResult> {
     const start = Date.now();
+    this.core.refresh();
     const plan = this.plan(input);
     const baseQuery: MemoryQuery = {
       text: plan.query,

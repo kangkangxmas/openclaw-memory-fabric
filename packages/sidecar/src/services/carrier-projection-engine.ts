@@ -40,6 +40,12 @@ export interface CarrierProjectionRecord {
 const PROJECTION_VERSION = "v2.0";
 const PROJECTION_MARKER_PREFIX = `<!-- memory-fabric projection:${PROJECTION_VERSION} memory:`;
 const SCHEMA_WHITELIST = new Set(["self-model.md", "decision-log.md", "execution-journal.md", "entities-glossary.md"]);
+const OWNERSHIP_RULES = [
+  { filename: "self-model.md", accepts: ["profile", "intent"], requirement: "high confidence L3/L5 with sourceRefs" },
+  { filename: "decision-log.md", accepts: ["decision"], requirement: "L1 decision with sourceRefs" },
+  { filename: "execution-journal.md", accepts: ["episode", "todo", "unresolved"], requirement: "L2 execution state with sourceRefs" },
+  { filename: "entities-glossary.md", accepts: ["entity"], requirement: "L1 entity or graph-backed glossary item with sourceRefs" },
+];
 
 function targetFile(entry: MemoryEntryV2): string | null {
   switch (entry.type) {
@@ -245,6 +251,18 @@ export class CarrierProjectionEngine {
       .filter((record) => !opts.projectId || record.projectId === opts.projectId)
       .sort((a, b) => new Date(b.appliedAt).getTime() - new Date(a.appliedAt).getTime())
       .slice(0, Math.max(1, Math.min(opts.limit ?? 50, 500)));
+  }
+
+  policy(): {
+    projectionVersion: string;
+    schemaWhitelist: string[];
+    ownershipRules: typeof OWNERSHIP_RULES;
+  } {
+    return {
+      projectionVersion: PROJECTION_VERSION,
+      schemaWhitelist: [...SCHEMA_WHITELIST],
+      ownershipRules: OWNERSHIP_RULES,
+    };
   }
 
   private async appendHistory(record: CarrierProjectionRecord): Promise<void> {
