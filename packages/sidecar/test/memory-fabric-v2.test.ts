@@ -727,10 +727,20 @@ describe("Memory Fabric V2", () => {
     expect(driftBody.report.projectionVersion).toBe("v2.0");
     expect(driftBody.report.issues.length).toBeGreaterThan(0);
 
+    const previewRes = await app.inject({
+      method: "POST",
+      url: "/v2/carriers/projection/preview",
+      payload: { agentId: "development", projectId: "openclaw" },
+    });
+    const previewBody = JSON.parse(previewRes.body);
+    expect(previewBody.preview.status).toBe("preview");
+    expect(previewBody.preview.summary.changedFiles).toBeGreaterThan(0);
+    expect(previewBody.preview.files.some((file: { filename: string; diff: unknown[] }) => file.filename === "decision-log.md" && file.diff.length > 0)).toBe(true);
+
     const applyRes = await app.inject({
       method: "POST",
-      url: "/v2/carriers/projection/apply",
-      payload: { agentId: "development", projectId: "openclaw" },
+      url: "/v2/carriers/projection/apply-preview",
+      payload: { previewId: previewBody.preview.previewId },
     });
     const applyBody = JSON.parse(applyRes.body);
     expect(applyBody.projection.status).toBe("applied");
@@ -776,10 +786,17 @@ describe("Memory Fabric V2", () => {
     expect(benchBody.report.cases).toBe(1);
     expect(benchBody.report.status).toBe("complete");
     expect(benchBody.report.recallAt5).toBeGreaterThanOrEqual(0);
+    expect(Boolean(benchBody.report.results[0].planIntent)).toBe(true);
+    expect(benchBody.report.results[0].matchedTerms).toContain("Hy-Memory");
 
     const latestBenchRes = await app.inject({ method: "GET", url: "/v2/bench/report" });
     const latestBenchBody = JSON.parse(latestBenchRes.body);
     expect(latestBenchBody.report.cases).toBe(1);
+
+    const benchHistoryRes = await app.inject({ method: "GET", url: "/v2/bench/history?limit=5" });
+    const benchHistoryBody = JSON.parse(benchHistoryRes.body);
+    expect(benchHistoryBody.count).toBeGreaterThanOrEqual(1);
+    expect(benchHistoryBody.history[0].cases).toBe(1);
 
     const benchStatusRes = await app.inject({ method: "GET", url: "/v2/bench/status" });
     const benchStatusBody = JSON.parse(benchStatusRes.body);
@@ -974,6 +991,15 @@ describe("Memory Fabric V2", () => {
     });
     expect(sensitiveCandidateRes.statusCode).toBe(200);
 
+    const sensitivePromotionRes = await app.inject({
+      method: "POST",
+      url: "/v2/consolidation/run",
+      payload: { agentId: "development", projectId: "openclaw" },
+    });
+    const sensitivePromotionBody = JSON.parse(sensitivePromotionRes.body);
+    const sensitivePromotedMemoryId = sensitivePromotionBody.result.entries[0]?.memoryId as string | undefined;
+    expect(Boolean(sensitivePromotedMemoryId)).toBe(true);
+
     const sensitiveReportRes = await app.inject({
       method: "GET",
       url: "/v2/ops/sensitive-candidates?agentId=development&projectId=openclaw",
@@ -982,14 +1008,28 @@ describe("Memory Fabric V2", () => {
     expect(sensitiveReportBody.count).toBe(1);
     expect(sensitiveReportBody.byReason.database_connection_info).toBe(1);
     expect(sensitiveReportBody.samples[0].content).toBeUndefined();
+    expect(sensitiveReportBody.samples[0].promotedMemoryId).toBe(sensitivePromotedMemoryId);
 
     const rejectSensitiveRes = await app.inject({
       method: "POST",
       url: "/v2/ops/sensitive-candidates/reject",
-      payload: { agentId: "development", projectId: "openclaw" },
+      payload: { agentId: "development", projectId: "openclaw", retractPromotedMemories: true },
     });
     const rejectSensitiveBody = JSON.parse(rejectSensitiveRes.body);
     expect(rejectSensitiveBody.rejected).toBe(1);
+    expect(rejectSensitiveBody.retractedMemories).toBe(1);
+
+    const sensitiveTraceRes = await app.inject({ method: "GET", url: `/v2/memories/${sensitivePromotedMemoryId}/trace` });
+    const sensitiveTraceBody = JSON.parse(sensitiveTraceRes.body);
+    expect(sensitiveTraceBody.status).toBe("retracted");
+
+    const sensitiveAuditRes = await app.inject({
+      method: "GET",
+      url: "/v2/ops/sensitive-candidates/audit?agentId=development&projectId=openclaw",
+    });
+    const sensitiveAuditBody = JSON.parse(sensitiveAuditRes.body);
+    expect(sensitiveAuditBody.count).toBeGreaterThanOrEqual(1);
+    expect(sensitiveAuditBody.entries.some((entry: { candidateId: string; promotedMemoryId?: string }) => entry.promotedMemoryId === sensitivePromotedMemoryId)).toBe(true);
 
     const evidenceAuditRes = await app.inject({
       method: "GET",

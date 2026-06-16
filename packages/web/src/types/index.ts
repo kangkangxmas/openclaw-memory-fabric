@@ -209,12 +209,36 @@ export interface V2RecallPlanResponse {
   plan: {
     query: string;
     intent: string;
+    layers?: string[];
+    preferredTypes?: string[];
+    scope?: string;
+    weights?: Record<string, number>;
     reason: string;
   };
+  entries?: Array<Record<string, unknown>>;
   cards: MemoryCard[];
   rendered: string;
   executionTimeMs: number;
   relations?: V2Relation[];
+  ranking?: Array<{
+    memoryId: string;
+    type: string;
+    status: string;
+    score: number;
+    lexical: number;
+    quality: number;
+    temporal: number;
+    relationCount: number;
+    sourceRefCount: number;
+    selected: boolean;
+  }>;
+  filterSummary?: {
+    refreshed: boolean;
+    scored: number;
+    sourceLessFiltered: number;
+    focusedDropped: number;
+    selected: number;
+  };
 }
 
 export interface V2RecallAuditEntry {
@@ -247,10 +271,20 @@ export interface V2TraceResponse {
   ok: boolean;
   memoryId: string;
   status: string;
+  entry?: Record<string, unknown>;
   sourceRefs: string[];
   sources: Array<Record<string, unknown>>;
   events: Array<Record<string, unknown>>;
   relations?: V2Relation[];
+  relationPaths?: Array<{
+    relationId: string;
+    type: V2Relation["type"];
+    direction: "incoming" | "outgoing";
+    source: string;
+    target: string;
+    confidence: number;
+    evidenceRefs: string[];
+  }>;
 }
 
 export interface V2Candidate {
@@ -322,6 +356,43 @@ export interface V2CarrierProjectionRecord {
   skipped: string[];
 }
 
+export interface V2CarrierProjectionDiffLine {
+  type: "context" | "added" | "removed";
+  line: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
+}
+
+export interface V2CarrierProjectionPreviewFile {
+  filename: string;
+  before: string;
+  after: string;
+  changed: boolean;
+  additions: number;
+  removals: number;
+  diff: V2CarrierProjectionDiffLine[];
+}
+
+export interface V2CarrierProjectionPreview {
+  previewId: string;
+  agentId: string;
+  projectId?: string;
+  projectionVersion: string;
+  status: "preview";
+  createdAt: string;
+  expiresAt: string;
+  patches: Array<{ filename: string; content: string }>;
+  rollbackPatches: Array<{ filename: string; content: string }>;
+  files: V2CarrierProjectionPreviewFile[];
+  skipped: string[];
+  summary: {
+    files: number;
+    changedFiles: number;
+    additions: number;
+    removals: number;
+  };
+}
+
 export interface V2CarrierProjectionPolicy {
   projectionVersion: string;
   schemaWhitelist: string[];
@@ -370,11 +441,29 @@ export interface V2BenchReport {
   results: Array<{
     id: string;
     hit: boolean;
+    expectedTerms?: string[];
+    matchedTerms?: string[];
+    missingTerms?: string[];
+    planIntent?: string;
     cardCount: number;
+    evidenceCount?: number;
+    cardMemoryIds?: string[];
+    cardPreviews?: string[];
     latencyMs: number;
     status?: "pass" | "miss" | "timeout" | "error";
     error?: string;
   }>;
+}
+
+export interface V2BenchReportSummary {
+  generatedAt: string;
+  status: "complete" | "partial" | "failed";
+  cases: number;
+  completedCases: number;
+  recallAt5: number;
+  injectionPrecision: number;
+  sourceCoverage: number;
+  p95LatencyMs: number;
 }
 
 export interface V2BenchActiveRun {
@@ -460,6 +549,20 @@ export interface V2SensitiveCandidateReport {
     reason: string;
     promotedMemoryId?: string;
   }>;
+}
+
+export interface V2SensitiveCandidateAuditEntry {
+  auditId: string;
+  createdAt: string;
+  action: "reject" | "quarantine" | "retract" | "delete";
+  agentId: string;
+  projectId?: string;
+  candidateId: string;
+  reason: string;
+  promotedMemoryId?: string;
+  previousMemoryStatus?: string;
+  newMemoryStatus?: string;
+  reviewedBy: string;
 }
 
 export interface V2EvidenceAuditReport {

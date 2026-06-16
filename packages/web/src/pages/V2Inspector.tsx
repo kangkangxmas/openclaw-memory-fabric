@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { AppContext } from "../App";
 import type {
   MemoryCard,
@@ -6,12 +6,14 @@ import type {
   V2BenchFixtureSet,
   V2BenchFixtureCleanupResult,
   V2BenchReport,
+  V2BenchReportSummary,
   V2BenchSeedResult,
   V2BenchStatus,
   V2CanaryStatus,
   V2CarrierDriftReport,
   V2CarrierProjectionRecord,
   V2CarrierProjectionPolicy,
+  V2CarrierProjectionPreview,
   V2Candidate,
   V2CandidateStats,
   V2ConsolidationStatus,
@@ -23,6 +25,7 @@ import type {
   V2RecallPlanResponse,
   V2RolloutModeRow,
   V2RolloutModesResponse,
+  V2SensitiveCandidateAuditEntry,
   V2SensitiveCandidateReport,
   V2TraceResponse,
 } from "../types";
@@ -157,11 +160,16 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   const [evidenceAudit, setEvidenceAudit] = useState<V2EvidenceAuditReport | null>(null);
   const [projectionHistory, setProjectionHistory] = useState<V2CarrierProjectionRecord[]>([]);
   const [projectionPolicy, setProjectionPolicy] = useState<V2CarrierProjectionPolicy | null>(null);
+  const [projectionPreview, setProjectionPreview] = useState<V2CarrierProjectionPreview | null>(null);
+  const [projectionFile, setProjectionFile] = useState<string>("");
   const [seed, setSeed] = useState<V2BenchSeedResult | null>(null);
   const [gray, setGray] = useState<V2GrayStatus | null>(null);
   const [canary, setCanary] = useState<V2CanaryStatus | null>(null);
   const [contextHealth, setContextHealth] = useState<V2ContextHealthReport | null>(null);
   const [recallAudit, setRecallAudit] = useState<V2RecallAuditEntry[]>([]);
+  const [benchHistory, setBenchHistory] = useState<V2BenchReportSummary[]>([]);
+  const [sensitiveAudit, setSensitiveAudit] = useState<V2SensitiveCandidateAuditEntry[]>([]);
+  const [relationFilter, setRelationFilter] = useState<string>("all");
   const [rollout, setRollout] = useState<V2RolloutModesResponse | null>(null);
   const [modeDrafts, setModeDrafts] = useState<Record<string, V2Mode>>({});
   const [manualScopes, setManualScopes] = useState<RolloutScope[]>([]);
@@ -281,6 +289,8 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       evidenceRes,
       projectionHistoryRes,
       projectionPolicyRes,
+      benchHistoryRes,
+      sensitiveAuditRes,
     ] = await Promise.all([
       api.getV2Candidates(agentId, projectId),
       api.getV2ConsolidationStatus(agentId, projectId),
@@ -296,6 +306,8 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
       api.getV2EvidenceAudit(agentId, projectId),
       api.getV2CarrierProjectionHistory(agentId, projectId, 10),
       api.getV2CarrierProjectionPolicy(),
+      api.getV2BenchHistory(12),
+      api.getV2SensitiveCandidateAudit(agentId, projectId, 20),
     ]);
     setCandidates(candidateRes.candidates);
     setCandidateStats(statusRes.candidateStats);
@@ -312,6 +324,8 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setEvidenceAudit(evidenceRes);
     setProjectionHistory(projectionHistoryRes.history);
     setProjectionPolicy(projectionPolicyRes.policy);
+    setBenchHistory(benchHistoryRes.history);
+    setSensitiveAudit(sensitiveAuditRes.entries);
     setModeDrafts((prev) => {
       const next = { ...prev };
       for (const row of rolloutRes.modes) {
@@ -426,19 +440,20 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     setManualScopes((prev) => prev.filter((item) => rolloutKey(item) !== rolloutKey(scope)));
   };
 
-  const applyProjection = async () => {
+  const previewProjection = async () => {
     if (!ctx.agentId) return;
-    if (!window.confirm(t("v2.confirm.applyProjection"))) return;
-    const res = await api.applyV2CarrierProjection(ctx.agentId, ctx.projectId || undefined);
-    setProjection(res.projection);
+    const res = await api.previewV2CarrierProjection(ctx.agentId, ctx.projectId || undefined);
+    setProjectionPreview(res.preview);
+    setProjectionFile(res.preview.files.find((file) => file.changed)?.filename ?? res.preview.files[0]?.filename ?? "");
     await loadDrift();
   };
 
-  const rollbackProjection = async () => {
-    if (!projection) return;
-    if (!window.confirm(t("v2.confirm.rollbackProjection"))) return;
-    const res = await api.rollbackV2CarrierProjection(projection.projectionId);
+  const applyProjection = async () => {
+    if (!projectionPreview) return;
+    if (!window.confirm(t("v2.confirm.applyProjection"))) return;
+    const res = await api.applyV2CarrierProjectionPreview(projectionPreview.previewId);
     setProjection(res.projection);
+    setProjectionPreview(null);
     await loadDrift();
     setProjectionHistory((await api.getV2CarrierProjectionHistory(ctx.agentId || undefined, ctx.projectId || undefined, 10)).history);
   };
@@ -493,9 +508,10 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const loadLatestBench = async () => {
-    const [res, statusRes] = await Promise.all([api.getV2BenchReport(), api.getV2BenchStatus()]);
+    const [res, statusRes, historyRes] = await Promise.all([api.getV2BenchReport(), api.getV2BenchStatus(), api.getV2BenchHistory(12)]);
     setBench(res.report);
     setBenchStatus(statusRes);
+    setBenchHistory(historyRes.history);
   };
 
   const seedBench = async (useFixtures = false) => {
@@ -525,6 +541,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const conflictCards = (recall?.cards ?? []).filter((card) => card.conflict);
+  const selectedProjectionFile = projectionPreview?.files.find((file) => file.filename === projectionFile) ?? projectionPreview?.files[0];
   const benchRunning = benchStatus?.state === "running";
   const benchActive = benchStatus?.activeRun;
   const reviewReasonCounts = useMemo(() => {
@@ -535,6 +552,11 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
   }, [candidates]);
+
+  const filteredTraceRelations = useMemo(() => {
+    const paths = trace?.relationPaths ?? [];
+    return relationFilter === "all" ? paths : paths.filter((path) => path.type === relationFilter);
+  }, [relationFilter, trace?.relationPaths]);
 
   const sortedCandidates = useMemo(() => {
     const priority: Record<V2Candidate["status"], number> = {
@@ -1035,6 +1057,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
             <Metric label="Sensitive" value={sensitiveReport?.count ?? "-"} />
             <Metric label="Evidence" value={evidenceAudit ? pct(evidenceAudit.sourceCoverage) : "-"} />
             <Metric label="Source-less" value={evidenceAudit?.sourceLess ?? "-"} />
+              <Metric label={t("v2.safety.audit")} value={sensitiveAudit.length} />
           </div>
           {sensitiveReport && Object.keys(sensitiveReport.byReason).length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1">
@@ -1065,9 +1088,19 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
               disabled={!!loading || !sensitiveReport || sensitiveReport.count === 0}
               className="px-3 py-1.5 border border-red-400/40 rounded-lg text-xs text-red-200 disabled:opacity-50"
             >
-              {t("v2.safety.reject")}
+              {t("v2.safety.quarantineRetract")}
             </button>
           </div>
+          {sensitiveAudit.length > 0 && (
+            <div className="mt-3 max-h-28 overflow-auto rounded-lg border border-line bg-deep px-3 py-2 text-xs text-muted">
+              {sensitiveAudit.slice(0, 5).map((entry) => (
+                <div key={entry.auditId} className="mb-2">
+                  <span className="font-mono text-ink">{entry.action}</span> · {entry.reason} · {entry.candidateId}
+                  {entry.promotedMemoryId ? ` · ${entry.previousMemoryStatus ?? "?"}->${entry.newMemoryStatus ?? "?"}` : ""}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
@@ -1088,6 +1121,60 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
               ))}
             </div>
           </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => void run("projection-preview", previewProjection)}
+              disabled={!!loading || !ctx.agentId}
+              className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs disabled:opacity-50"
+            >
+              {t("v2.projectionOps.preview")}
+            </button>
+            <button
+              onClick={() => void run("projection-apply-preview", applyProjection)}
+              disabled={!!loading || !projectionPreview || projectionPreview.summary.changedFiles === 0}
+              className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink disabled:opacity-50"
+            >
+              {t("v2.projectionOps.applyPreview")}
+            </button>
+          </div>
+          {projectionPreview && (
+            <div className="mt-3 rounded-lg border border-line bg-deep p-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-mono text-ink">{projectionPreview.previewId}</div>
+                <CompactBadge>
+                  {projectionPreview.summary.changedFiles}/{projectionPreview.summary.files} files · +{projectionPreview.summary.additions} -{projectionPreview.summary.removals}
+                </CompactBadge>
+              </div>
+              {projectionPreview.skipped.length > 0 && (
+                <div className="mt-2 rounded border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-amber-200">
+                  {projectionPreview.skipped.join(" · ")}
+                </div>
+              )}
+              <div className="mt-3 flex flex-wrap gap-1">
+                {projectionPreview.files.map((file) => (
+                  <button
+                    key={file.filename}
+                    onClick={() => setProjectionFile(file.filename)}
+                    className={`rounded border px-2 py-1 text-xs ${
+                      selectedProjectionFile?.filename === file.filename
+                        ? "border-accent bg-accent text-white"
+                        : "border-line text-ink"
+                    }`}
+                  >
+                    {file.filename} {file.changed ? `+${file.additions}/-${file.removals}` : "no change"}
+                  </button>
+                ))}
+              </div>
+              {selectedProjectionFile && (
+                <pre className="mt-3 max-h-64 overflow-auto rounded bg-panel p-2 text-[11px] leading-relaxed text-ink">
+                  {selectedProjectionFile.diff.map((line) => {
+                    const prefix = line.type === "added" ? "+" : line.type === "removed" ? "-" : " ";
+                    return `${prefix} ${line.line}`;
+                  }).join("\n") || t("v2.projectionOps.noDiff")}
+                </pre>
+              )}
+            </div>
+          )}
           <div className="mt-3 max-h-36 overflow-auto space-y-2">
             {projectionHistory.slice(0, 4).map((record) => (
               <div key={record.projectionId} className="rounded-lg border border-line bg-deep px-3 py-2 text-xs">
@@ -1429,6 +1516,20 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                 <div className="mt-1 text-xs text-muted">
                   {recall.plan.intent} | {recall.executionTimeMs}ms | {recall.plan.reason}
                 </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {(recall.plan.layers ?? []).map((layer) => (
+                    <CompactBadge key={layer}>{layer}</CompactBadge>
+                  ))}
+                  {(recall.plan.preferredTypes ?? []).slice(0, 5).map((type) => (
+                    <CompactBadge key={type}>{type}</CompactBadge>
+                  ))}
+                  {recall.filterSummary && (
+                    <CompactBadge status={recall.filterSummary.sourceLessFiltered > 0 ? "warn" : "ready"}>
+                      filtered {recall.filterSummary.sourceLessFiltered} source-less · selected {recall.filterSummary.selected}
+                    </CompactBadge>
+                  )}
+                  {recall.filterSummary?.refreshed && <CompactBadge>{t("v2.indexRefreshed")}</CompactBadge>}
+                </div>
               </div>
               <div className="divide-y divide-line/60">
                 {recall.cards.map((card: MemoryCard) => (
@@ -1458,6 +1559,48 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   </div>
                 )}
               </div>
+              {recall.ranking && recall.ranking.length > 0 && (
+                <div className="border-t border-line p-4">
+                  <div className="text-xs font-bold text-ink">{t("v2.injectionInspector")}</div>
+                  <div className="mt-2 max-h-56 overflow-auto rounded-lg border border-line">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-panel text-muted">
+                        <tr className="border-b border-line">
+                          <th className="px-3 py-2 text-left font-medium">Memory</th>
+                          <th className="px-3 py-2 text-right font-medium">Score</th>
+                          <th className="px-3 py-2 text-right font-medium">Lex</th>
+                          <th className="px-3 py-2 text-right font-medium">Quality</th>
+                          <th className="px-3 py-2 text-right font-medium">Rel</th>
+                          <th className="px-3 py-2 text-right font-medium">Sources</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recall.ranking.map((row) => (
+                          <tr key={row.memoryId} className="border-b border-line/50">
+                            <td className="px-3 py-2">
+                              <button
+                                onClick={() => void run("trace", () => loadTrace(row.memoryId))}
+                                className="font-mono text-accent hover:underline"
+                              >
+                                {row.memoryId}
+                              </button>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                <CompactBadge status={row.selected ? "ready" : row.status}>{row.selected ? "selected" : row.status}</CompactBadge>
+                                <CompactBadge>{row.type}</CompactBadge>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-right text-muted">{row.score.toFixed(3)}</td>
+                            <td className="px-3 py-2 text-right text-muted">{row.lexical.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-muted">{row.quality.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-muted">{row.relationCount}</td>
+                            <td className="px-3 py-2 text-right text-muted">{row.sourceRefCount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="rounded-lg border border-line bg-panel/85 p-4 shadow-card">
@@ -1468,18 +1611,18 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => void run("projection-apply", applyProjection)}
+                    onClick={() => void run("projection-preview", previewProjection)}
                     disabled={!!loading || !ctx.agentId}
                     className="px-2 py-1 bg-accent text-white rounded text-xs disabled:opacity-50"
                   >
-                    Apply
+                    {t("v2.projectionOps.preview")}
                   </button>
                   <button
-                    onClick={() => void run("projection-rollback", rollbackProjection)}
-                    disabled={!!loading || !projection || projection.status !== "applied"}
+                    onClick={() => void run("projection-apply-preview", applyProjection)}
+                    disabled={!!loading || !projectionPreview || projectionPreview.summary.changedFiles === 0}
                     className="px-2 py-1 border border-line rounded text-xs text-ink disabled:opacity-50"
                   >
-                    Rollback
+                    {t("v2.projectionOps.applyPreview")}
                   </button>
                 </div>
               </div>
@@ -1612,19 +1755,38 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   </div>
 
                   <div className="rounded-lg border border-line overflow-hidden">
-                    <div className="border-b border-line px-3 py-2 text-xs font-bold text-ink">
-                      Relation Trace
+                    <div className="border-b border-line px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs font-bold text-ink">{t("v2.relationTrace")}</div>
+                        <select
+                          value={relationFilter}
+                          onChange={(event) => setRelationFilter(event.target.value)}
+                          className="rounded border border-line bg-deep px-2 py-1 text-[11px] text-ink"
+                        >
+                          <option value="all">all</option>
+                          {["DECIDES", "IMPLEMENTS", "SUPERSEDES", "CAUSES", "VALIDATES", "CONSTRAINS"].map((type) => (
+                            <option key={type} value={type}>{type}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                     <div className="max-h-52 overflow-auto divide-y divide-line/50">
-                      {traceRelations.slice(0, 12).map((relation) => (
-                        <div key={relation.relationId} className="px-3 py-2 text-xs">
-                          <div className="font-mono text-muted">{relation.relationId}</div>
+                      {filteredTraceRelations.slice(0, 12).map((path) => (
+                        <div key={path.relationId} className="px-3 py-2 text-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-muted">{path.relationId}</span>
+                            <CompactBadge>{path.type}</CompactBadge>
+                            <CompactBadge>{path.direction}</CompactBadge>
+                          </div>
                           <div className="mt-1 text-ink">
-                            {relation.type}: {relation.sourceKind}:{relation.sourceId} {"->"} {relation.targetKind}:{relation.targetId}
+                            {path.source} {"->"} {path.target}
+                          </div>
+                          <div className="mt-1 text-muted">
+                            confidence {pct(path.confidence)} · evidence {path.evidenceRefs.join(", ") || "none"}
                           </div>
                         </div>
                       ))}
-                      {traceRelations.length === 0 && (
+                      {filteredTraceRelations.length === 0 && (
                         <div className="px-3 py-6 text-center text-sm bg-amber-400/10 text-amber-200">{t("v2.relations.empty")}</div>
                       )}
                     </div>
@@ -1676,6 +1838,21 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   <Metric label="Errors" value={`${bench.errorCount ?? bench.errors?.length ?? 0}`} />
                   <Metric label="Duration" value={bench.durationMs !== undefined ? `${bench.durationMs}ms` : "-"} />
                 </div>
+                {benchHistory.length > 0 && (
+                  <div className="rounded-lg border border-line bg-deep p-3">
+                    <div className="text-xs font-bold text-ink">{t("v2.bench.history")}</div>
+                    <div className="mt-2 grid gap-2">
+                      {benchHistory.slice(0, 5).map((item) => (
+                        <div key={`${item.generatedAt}-${item.cases}`} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 text-xs">
+                          <span className="truncate text-muted">{formatTime(item.generatedAt)}</span>
+                          <span className="text-ink">{pct(item.recallAt5)}</span>
+                          <span className="text-muted">{pct(item.sourceCoverage)}</span>
+                          <span className="text-muted">{item.p95LatencyMs}ms</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {bench.errors && bench.errors.length > 0 && (
                   <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-100">
                     {bench.errors.slice(0, 3).map((item) => `${item.id}: ${item.message}`).join(" · ")}
@@ -1685,12 +1862,26 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                   <table className="w-full text-xs">
                     <tbody>
                       {bench.results.slice(0, 12).map((row) => (
-                        <tr key={row.id} className="border-b border-line/50">
-                          <td className="px-3 py-2 text-ink">{row.id}</td>
-                          <td className="px-3 py-2 text-right text-muted">{row.status ?? (row.hit ? "pass" : "miss")}</td>
-                          <td className="px-3 py-2 text-right text-muted">{row.cardCount} cards</td>
-                          <td className="px-3 py-2 text-right text-muted">{row.latencyMs}ms</td>
-                        </tr>
+                        <Fragment key={row.id}>
+                          <tr key={row.id} className="border-b border-line/50">
+                            <td className="px-3 py-2 text-ink">{row.id}</td>
+                            <td className="px-3 py-2 text-right text-muted">{row.status ?? (row.hit ? "pass" : "miss")}</td>
+                            <td className="px-3 py-2 text-right text-muted">{row.cardCount} cards · {row.evidenceCount ?? 0} evidence</td>
+                            <td className="px-3 py-2 text-right text-muted">{row.latencyMs}ms</td>
+                          </tr>
+                          {(!row.hit || row.error) && (
+                            <tr key={`${row.id}-detail`} className="border-b border-line/50 bg-deep/70">
+                              <td className="px-3 py-2 text-xs text-muted" colSpan={4}>
+                                {row.error ? `error: ${row.error}` : ""}
+                                {row.missingTerms && row.missingTerms.length > 0 ? ` missing: ${row.missingTerms.join(", ")}` : ""}
+                                {row.matchedTerms && row.matchedTerms.length > 0 ? ` matched: ${row.matchedTerms.join(", ")}` : ""}
+                                {row.cardPreviews && row.cardPreviews.length > 0 && (
+                                  <div className="mt-1 text-ink">{clip(row.cardPreviews[0], 180)}</div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>

@@ -24,6 +24,7 @@ import type {
   V2CarrierDriftReport,
   V2CarrierProjectionRecord,
   V2CarrierProjectionPolicy,
+  V2CarrierProjectionPreview,
   V2Candidate,
   V2CandidateStats,
   V2ConsolidationStatus,
@@ -32,6 +33,7 @@ import type {
   V2BenchFixtureCleanupResult,
   V2BenchFixtureSet,
   V2BenchReport,
+  V2BenchReportSummary,
   V2BenchSeedResult,
   V2BenchStatus,
   V2CanaryStatus,
@@ -42,6 +44,7 @@ import type {
   V2Relation,
   V2RolloutModesResponse,
   V2SensitiveCandidateReport,
+  V2SensitiveCandidateAuditEntry,
 } from "../types";
 
 function resolveApiBase(): string {
@@ -227,6 +230,18 @@ export const api = {
       limit: 100,
     }),
 
+  previewV2CarrierProjection: (agentId: string, projectId?: string) =>
+    post<{ ok: boolean; preview: V2CarrierProjectionPreview }>("/v2/carriers/projection/preview", {
+      agentId,
+      projectId,
+      limit: 100,
+    }),
+
+  applyV2CarrierProjectionPreview: (previewId: string) =>
+    post<{ ok: boolean; projection: V2CarrierProjectionRecord }>("/v2/carriers/projection/apply-preview", {
+      previewId,
+    }),
+
   rollbackV2CarrierProjection: (projectionId: string) =>
     post<{ ok: boolean; projection: V2CarrierProjectionRecord; error?: string }>("/v2/carriers/projection/rollback", {
       projectionId,
@@ -265,6 +280,11 @@ export const api = {
   }) => post<{ ok: boolean; report: V2BenchReport }>("/v2/bench/run", opts ?? {}),
 
   getV2BenchReport: () => get<{ ok: boolean; report: V2BenchReport | null }>("/v2/bench/report"),
+
+  getV2BenchHistory: (limit = 20) =>
+    get<{ ok: boolean; history: V2BenchReportSummary[]; count: number }>(
+      `/v2/bench/history?limit=${encodeURIComponent(String(limit))}`,
+    ),
 
   getV2BenchStatus: () => get<V2BenchStatus>("/v2/bench/status"),
 
@@ -330,12 +350,22 @@ export const api = {
       ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
     ),
 
-  rejectV2SensitiveCandidates: (agentId?: string, projectId?: string, deletePromotedMemories = true) =>
-    post<{ ok: boolean; checked: number; rejected: number; deletedMemories: number }>("/v2/ops/sensitive-candidates/reject", {
+  rejectV2SensitiveCandidates: (agentId?: string, projectId?: string, retractPromotedMemories = true) =>
+    post<{ ok: boolean; checked: number; rejected: number; retractedMemories: number; deletedMemories: number }>("/v2/ops/sensitive-candidates/reject", {
       agentId,
       projectId,
-      deletePromotedMemories,
+      action: "quarantine",
+      retractPromotedMemories,
     }),
+
+  getV2SensitiveCandidateAudit: (agentId?: string, projectId?: string, limit = 50) =>
+    get<{ ok: boolean; entries: V2SensitiveCandidateAuditEntry[]; count: number }>(
+      `/v2/ops/sensitive-candidates/audit${[
+        agentId ? `agentId=${encodeURIComponent(agentId)}` : "",
+        projectId ? `projectId=${encodeURIComponent(projectId)}` : "",
+        `limit=${encodeURIComponent(String(limit))}`,
+      ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
+    ),
 
   getV2AcceptanceStatus: () => get<V2AcceptanceStatus>("/v2/ops/acceptance/status"),
 

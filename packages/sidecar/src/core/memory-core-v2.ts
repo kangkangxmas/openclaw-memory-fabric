@@ -12,7 +12,7 @@
 
 import { join } from "path";
 import { existsSync } from "fs";
-import { readFile, writeFile } from "fs/promises";
+import { readFile, readdir, stat, writeFile } from "fs/promises";
 import type { SidecarConfig } from "../config/index.js";
 import { readJsonl, writeJsonl, appendJsonl, ensureDir } from "../utils/jsonl.js";
 import {
@@ -129,6 +129,7 @@ export class MemoryCoreV2 {
   private readonly index: MemoryIndex;
   private readonly cache: MemoryCache;
   private indexBuilt = false;
+  private storageSignature?: string;
 
   constructor(
     private readonly cfg: SidecarConfig["openviking"],
@@ -145,6 +146,21 @@ export class MemoryCoreV2 {
     this.index.clear();
     this.cache.clear();
     this.indexBuilt = false;
+    this.storageSignature = undefined;
+  }
+
+  /**
+   * Refresh only when persisted memory files changed.
+   *
+   * RetrievalPlanner uses this to keep externally promoted memories visible
+   * without rebuilding the in-memory index on every recall.
+   */
+  async refreshIfChanged(): Promise<boolean> {
+    const nextSignature = await this.computeStorageSignature();
+    if (this.storageSignature === nextSignature) return false;
+    this.refresh();
+    this.storageSignature = nextSignature;
+    return true;
   }
 
   // -------------------------------------------------------------------------
@@ -183,6 +199,7 @@ export class MemoryCoreV2 {
 
     const newEntry = builder.build();
     await this.persist(newEntry);
+    this.storageSignature = undefined;
 
     // Update index and cache
     this.index.add(newEntry);
@@ -280,6 +297,7 @@ export class MemoryCoreV2 {
     if (filtered.length === entries.length) return false;
 
     await this.saveScope(scope, filtered);
+    this.storageSignature = undefined;
 
     // Remove from index and cache
     this.index.remove(entryId);
@@ -666,6 +684,7 @@ export class MemoryCoreV2 {
     if (idx >= 0) {
       entries[idx] = entry;
       await this.saveScope(scope, entries);
+      this.storageSignature = undefined;
       this.index.update(entry);
       this.cache.setEntry(entry.id, entry);
       this.cache.invalidateQueryCaches();
@@ -685,8 +704,6 @@ export class MemoryCoreV2 {
 
     // Resolve base directory using viking:// URI convention
     const basePath = this.resolveBaseDir();
-    const { readdir } = await import("fs/promises");
-
     try {
       const agentsDir = join(basePath, "agents");
       if (!existsSync(agentsDir)) return [];
@@ -762,7 +779,6 @@ export class MemoryCoreV2 {
 
     const basePath = this.resolveBaseDir();
     const agentsDir = join(basePath, "agents");
-    const { readdir } = await import("fs/promises");
     if (existsSync(agentsDir)) {
       const existingAgents = await readdir(agentsDir, { withFileTypes: true });
       for (const agentDir of existingAgents) {
@@ -778,5 +794,43 @@ export class MemoryCoreV2 {
       const memoriesPath = join(dir, "memories.jsonl");
       await writeJsonl(memoriesPath, agentEntries);
     }
+  }
+
+  private async computeStorageSignature(): Promise<string> {
+    const basePath = this.resolveBaseDir();
+    const agentsDir = join(basePath, "agents");
+    if (!existsSync(agentsDir)) return "missing";
+
+    const files = await this.collectMemoryFiles(agentsDir);
+    const parts: string[] = [];
+    for (const file of files.sort()) {
+      try {
+        const info = await stat(file);
+        parts.push(`${file}:${info.size}:${Math.floor(info.mtimeMs)}`);
+      } catch {
+        parts.push(`${file}:missing`);
+      }
+    }
+    return parts.join("|");
+  }
+
+  private async collectMemoryFiles(dir: string): Promise<string[]> {
+    const files: string[] = [];
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return files;
+    }
+
+    for (const entry of entries) {
+      const entryPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...await this.collectMemoryFiles(entryPath));
+      } else if (entry.isFile() && entry.name === "memories.jsonl") {
+        files.push(entryPath);
+      }
+    }
+    return files;
   }
 }

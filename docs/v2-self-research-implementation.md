@@ -61,14 +61,14 @@ flowchart LR
 - `AtomicMemoryStore`：候选 L1 pending queue；无 `sourceRefs` 默认进入 `needs_review`。
 - `ConsolidationWorker`：后台处理 pending candidates，提供 start、stop、status、last result、last error 和 in-flight 幂等锁。
 - `MemoryConsolidator`：执行 source gate、质量评分、重复检测、`supersedes`、`validUntil` 和稳定库 promotion；profile/intent 需要明确用户指令、多源高质量证据或人工 review。
-- `RetrievalPlanner`：识别 fact lookup、decision history、task continuation、rule execution、entity relation，并返回可解释 plan；entity relation intent 接入 relation graph 排序增强。
+- `RetrievalPlanner`：识别 fact lookup、decision history、task continuation、rule execution、entity relation，并返回可解释 plan、filter summary 和 ranking 分解；entity relation intent 接入 relation graph 排序增强。
 - `MemoryCardPackager`：把稳定记忆压缩为 evidence-backed cards，支持去重、token budget、证据摘要、冲突/过期标记。
-- `CarrierProjectionEngine`：把结构化记忆审计为 Carrier Markdown 投影，支持 drift audit、apply、rollback 和 history。
+- `CarrierProjectionEngine`：把结构化记忆审计为 Carrier Markdown 投影，支持 drift audit、preview diff、apply-preview、apply、rollback 和 history。
 - `V2RelationGraphService`：记录 `DECIDES`、`IMPLEMENTS`、`SUPERSEDES`、`CAUSES`、`VALIDATES`、`CONSTRAINS` 关系边。
 - `RecallAuditLogService`：记录 v2-recall 灰度期间 legacy recall 与 v2 recall 的对照日志，包含 legacy sources/brief preview、v2 memory ids、evidence refs 和 card previews。
 - `PromptInjectionPolicy`：统一治理 legacy fallback 和 v2 召回注入，stale Graphify 只保留一行提示，Carrier 注入前过滤 compaction summary、conversation summary、memory-fabric 注入块和原始角色日志，并限制 L1/L2 注入长度。
 - `ContextHealthReporter`：只读扫描当前 OpenClaw Gateway 日志和 session/trajectory 文件，报告 compaction、overflow、timeout、stale detailed injection、超限 transcript 和 trajectory 归档候选；日志源优先使用 `~/Library/Logs/openclaw/gateway.log`，其次使用 `/tmp/openclaw/openclaw-YYYY-MM-DD.log`，最后才读取近期 legacy `~/.openclaw/logs/gateway*.log`，避免历史日志误报。
-- `MemoryBenchRunner`：内置 30+ 个 v0 用例，记录 Recall@5、Injection Precision、Stale Rate、Source Coverage、平均注入长度、P95 latency，并持久化 latest report。
+- `MemoryBenchRunner`：内置 30+ 个 v0 用例，记录 Recall@5、Injection Precision、Stale Rate、Source Coverage、平均注入长度、P95 latency，并持久化 latest report 和历史摘要；每个 case 输出 matched/missing terms、plan intent、evidence count 和 card previews。
 - `MemoryBenchFixtureSeeder`：把默认、自定义或持久化 fixture cases 可重复写入 L0 event、L1 candidate 并触发 promotion；用于真实灰度前建立稳定 fixture。
 
 ## 3. API 基线
@@ -86,9 +86,10 @@ flowchart LR
 - `POST /v2/recall/plan`：返回 retrieval plan、entries、memory cards 和渲染文本。
 - `POST /v2/recall/audit` / `GET /v2/recall/audit`：记录和查询 legacy/v2 recall 对照日志。
 - `GET /v2/context/health`：读取上下文压缩健康报告。
-- `GET /v2/memories/:id/trace`：查看 `sourceRefs`、原始 sources 和 L0 events。
+- `GET /v2/memories/:id/trace`：查看 `sourceRefs`、原始 sources、L0 events 和 relation path。
 - `GET /v2/carriers/drift?agentId=&projectId=`：查看 Carrier 投影漂移。
-- `POST /v2/carriers/projection/apply`：应用结构化记忆到 Carrier 投影。
+- `POST /v2/carriers/projection/preview` / `apply-preview`：预览并应用结构化记忆到 Carrier 投影。
+- `POST /v2/carriers/projection/apply`：兼容旧流程，直接应用结构化记忆到 Carrier 投影。
 - `POST /v2/carriers/projection/rollback`：按 projectionId 回滚 Carrier 投影。
 - `GET /v2/carriers/projection/history`：查看投影历史。
 - `GET /v2/graph/relations`：查询 v2 关系图。
@@ -96,6 +97,8 @@ flowchart LR
 - `POST /v2/bench/seed`：把默认或自定义 bench cases 灌入 L0/L1/stable memory。
 - `POST /v2/bench/run`：运行 Memory Bench v0。
 - `GET /v2/bench/report`：读取最新 Bench 报告。
+- `GET /v2/bench/history`：读取历史 Bench 报告摘要。
+- `GET /v2/ops/sensitive-candidates/audit`：查询敏感候选 reject/quarantine/retract/delete 审计日志。
 
 旧接口 `/recall`、`/commit`、`/carrier/*` 保持兼容；`MEMORY_FABRIC_V2_MODE=off` 可关闭 `/commit` 的 v2 shadow-write。
 
@@ -106,7 +109,7 @@ flowchart LR
 - `execution-journal.md`：接收 L2 episode、todo、unresolved。
 - `entities-glossary.md`：接收 L1 entity 和 Graphify 后续关系摘要。
 
-Carrier 是结构化记忆的 Markdown 投影，不再作为唯一事实源。投影 patch 必须属于固定 schema whitelist，并带 `memory-fabric projection:v2.0 memory:<id>` 所有权标记；不满足门禁的 patch 会被跳过并记录在 projection history 的 `skipped` 字段。
+Carrier 是结构化记忆的 Markdown 投影，不再作为唯一事实源。投影 patch 必须属于固定 schema whitelist，并带 `memory-fabric projection:v2.0 memory:<id>` 所有权标记；不满足门禁的 patch 会被跳过并记录在 preview/projection history 的 `skipped` 字段。生产运维默认走 `preview -> apply-preview` 两步流，直接 apply 仅保留为兼容入口。
 
 ## 5. Bench v0 验收目标
 

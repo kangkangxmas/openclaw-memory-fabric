@@ -24,20 +24,23 @@
 - Candidate Review 增加搜索、排序、失败原因聚合和 `POST /v2/memories/candidates/retry` 的受控入口；retry 仅覆盖 `needs_review/rejected`。
 - Source Trace 对缺失 `sourceRefs`、缺失 L0 events、`sourceRefs` 找不到 event、缺 source metadata、缺 relation trace 给出红色或黄色状态。
 - Acceptance Ops 增加验收目标、fixture scopes、latest bench readiness、fixture-backed acceptance run 和 seeded fixture cleanup。
-- Governance & Safety 增加 stable memory evidence audit、source-less samples、敏感 candidate 扫描和批量 reject；敏感扫描不回传原始 content。
-- Carrier Projection Governance 增加 policy 展示、schema whitelist、projection history 和 rollback 操作入口。
+- Governance & Safety 增加 stable memory evidence audit、source-less samples、敏感 candidate 扫描、批量 quarantine/retract 和 audit log；敏感扫描不回传原始 content。
+- Carrier Projection Governance 增加 policy 展示、schema whitelist、projection preview diff、apply-preview、projection history 和 rollback 操作入口。
+- Injection Inspector 增加 plan 展开、过滤摘要、ranking 分数、sourceRefs 数量和 selected 状态。
+- Relation Trace 增加 relation type 过滤和 direction/source/target/evidence 路径视图。
+- Bench 报告增加历史趋势、失败 case missing/matched terms 和 card preview drilldown。
 
 ## 还需要优化的 Web 功能
 
 ### P0：灰度运维安全
 
-- 已完成：多 Agent 灰度配置、逐 scope 切换/回滚/Emergency Off、二次确认、固定运行上下文状态条、Candidate retry/搜索/排序/失败聚合、Source Trace 缺失证据状态、Acceptance Ops、敏感候选治理、evidence audit、Carrier projection policy/history/rollback。
-- 剩余：把 projection apply/rollback 从按钮确认升级为 patch diff 审阅。
+- 已完成：多 Agent 灰度配置、逐 scope 切换/回滚/Emergency Off、二次确认、固定运行上下文状态条、Candidate retry/搜索/排序/失败聚合、Source Trace 缺失证据状态、Acceptance Ops、敏感候选治理、evidence audit、Carrier projection policy/history/preview diff/apply-preview/rollback。
+- 剩余：根据真实 canary 流量继续压低误报和补充更细的权限分级。
 
 ### P1：可解释性与效率
 
-- Injection Inspector 增加 plan 展开：intent、weights、filters、RRF ranking 和被过滤原因。
-- Relation Trace 增加按 relation type 过滤，以及 `memory -> event -> relation -> carrier` 的路径视图。
+- 已完成：Injection Inspector 增加 plan 展开：intent、layers、preferredTypes、filters、ranking 和 sourceRefs 覆盖。
+- 已完成：Relation Trace 增加按 relation type 过滤，以及 `memory -> event -> relation` 的路径视图。
 - Recall Audit 增加 legacy/v2 对比详情抽屉，展示 legacy sources、v2 evidence refs、card previews 和 latency。
 - Candidate 表保留最近筛选条件；搜索、按 confidence/sourceRefs 排序已完成。
 
@@ -45,11 +48,11 @@
 
 - 为 `product / Product`、`development / openclaw-memory-fabric` 提供预设 tabs，减少手动切换 Agent 的误差。
 - 增加 24h canary 趋势：pending、needs_review、source coverage、recall audit count、P95 latency。
-- Bench 报告增加历史趋势和阈值红线：Recall@5、Injection Precision、Stale Rate、Source Coverage、P95 latency。
-- Carrier Drift 展示 patch diff，而不是只列 issue 和 merged/skipped 数量。
+- 已完成：Bench 报告增加历史趋势和失败 case drilldown。
+- 已完成：Carrier Projection 展示 patch diff preview，不再只列 issue 和 merged/skipped 数量。
 
 ## 下一步建议
 
 1. 先在棱镜 `product / Product` 继续跑 2-3 轮真实 v2-write 会话，用本页确认 canary warning 是否只剩真实 recall audit 流量不足。
 2. 使用多 Agent 灰度面板把第二个低风险 Agent 加入 `v2-recall`，观察 pending、needs_review、sourceRefs 覆盖率和 recall audit。
-3. Carrier 投影治理基础已启动：先用 policy/history/rollback 保证可审计和可回滚；下一轮把 projection apply/rollback 做成可审阅 patch diff。
+3. Carrier 投影治理已进入可审阅 apply-preview 流程；下一步重点观察真实 projection diff 是否足够清晰，并按 canary 使用反馈补权限分级。

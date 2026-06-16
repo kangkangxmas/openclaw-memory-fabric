@@ -28,6 +28,25 @@ export interface RecallPlanResult {
   cards: MemoryCard[];
   rendered: string;
   relations?: V2Relation[];
+  ranking: Array<{
+    memoryId: string;
+    type: MemoryType;
+    status: string;
+    score: number;
+    lexical: number;
+    quality: number;
+    temporal: number;
+    relationCount: number;
+    sourceRefCount: number;
+    selected: boolean;
+  }>;
+  filterSummary: {
+    refreshed: boolean;
+    scored: number;
+    sourceLessFiltered: number;
+    focusedDropped: number;
+    selected: number;
+  };
   executionTimeMs: number;
 }
 
@@ -142,7 +161,7 @@ export class RetrievalPlanner {
 
   async recall(input: { query: string; agentId?: string; projectId?: string; scope?: "private" | "project" | "shared"; limit?: number }): Promise<RecallPlanResult> {
     const start = Date.now();
-    this.core.refresh();
+    const refreshed = await this.core.refreshIfChanged();
     const plan = this.plan(input);
     const baseQuery: MemoryQuery = {
       text: plan.query,
@@ -165,10 +184,17 @@ export class RetrievalPlanner {
           })
         : [];
 
-    const scores = new Map<string, { entry: MemoryEntryV2; score: number; lexical: number }>();
+    const scores = new Map<string, { entry: MemoryEntryV2; score: number; lexical: number; quality: number; temporal: number; relationCount: number }>();
     const add = (entries: MemoryEntryV2[], weight: number): void => {
       entries.forEach((entry, rank) => {
-        const current = scores.get(entry.id) ?? { entry, score: 0, lexical: lexicalRelevance(entry, plan.query) };
+        const current = scores.get(entry.id) ?? {
+          entry,
+          score: 0,
+          lexical: lexicalRelevance(entry, plan.query),
+          quality: qualityScore(entry),
+          temporal: temporalBoost(entry),
+          relationCount: 0,
+        };
         current.score += rrf(rank) * weight;
         scores.set(entry.id, current);
       });
@@ -180,16 +206,18 @@ export class RetrievalPlanner {
 
     for (const current of scores.values()) {
       current.score += current.lexical * 0.85;
-      current.score += qualityScore(current.entry) * plan.weights.sourceQuality;
-      current.score += temporalBoost(current.entry) * plan.weights.temporal;
+      current.score += current.quality * plan.weights.sourceQuality;
+      current.score += current.temporal * plan.weights.temporal;
       if (plan.preferredTypes.includes(current.entry.type)) current.score += 0.05;
       const relationCount = relations.filter(
         (relation) => relation.sourceId === current.entry.id || relation.targetId === current.entry.id
       ).length;
+      current.relationCount = relationCount;
       if (relationCount > 0) current.score += Math.min(0.2, relationCount * 0.04) * plan.weights.graph;
     }
 
-    const ranked = Array.from(scores.values())
+    const scored = Array.from(scores.values());
+    const ranked = scored
       .filter((item) => hasEvidence(item.entry))
       .sort((a, b) => b.score - a.score);
     const topLexical = ranked[0]?.lexical ?? 0;
@@ -199,6 +227,7 @@ export class RetrievalPlanner {
         : ranked;
     const entries = focused.slice(0, input.limit ?? 8).map((item) => item.entry);
     const cards = this.packager.package(entries, { limit: input.limit ?? 8, tokenBudget: plan.intent === "task_continuation" ? 900 : 700 });
+    const selectedIds = new Set(entries.map((entry) => entry.id));
 
     return {
       plan,
@@ -206,6 +235,25 @@ export class RetrievalPlanner {
       cards,
       rendered: this.packager.render(cards),
       relations: relations.filter((relation) => entries.some((entry) => relation.sourceId === entry.id || relation.targetId === entry.id)).slice(0, 20),
+      ranking: ranked.slice(0, 20).map((item) => ({
+        memoryId: item.entry.id,
+        type: item.entry.type,
+        status: item.entry.status ?? "active",
+        score: Number(item.score.toFixed(4)),
+        lexical: Number(item.lexical.toFixed(4)),
+        quality: Number(item.quality.toFixed(4)),
+        temporal: Number(item.temporal.toFixed(4)),
+        relationCount: item.relationCount,
+        sourceRefCount: (item.entry.sourceRefs?.length ?? 0) + (item.entry.sources?.length ?? 0),
+        selected: selectedIds.has(item.entry.id),
+      })),
+      filterSummary: {
+        refreshed,
+        scored: scored.length,
+        sourceLessFiltered: scored.filter((item) => !hasEvidence(item.entry)).length,
+        focusedDropped: Math.max(0, ranked.length - focused.length),
+        selected: entries.length,
+      },
       executionTimeMs: Date.now() - start,
     };
   }

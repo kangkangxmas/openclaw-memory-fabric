@@ -37,6 +37,43 @@ export interface CarrierProjectionRecord {
   skipped: string[];
 }
 
+export interface CarrierProjectionDiffLine {
+  type: "context" | "added" | "removed";
+  line: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
+}
+
+export interface CarrierProjectionFilePreview {
+  filename: string;
+  before: string;
+  after: string;
+  changed: boolean;
+  additions: number;
+  removals: number;
+  diff: CarrierProjectionDiffLine[];
+}
+
+export interface CarrierProjectionPreviewRecord {
+  previewId: string;
+  agentId: string;
+  projectId?: string;
+  projectionVersion: string;
+  status: "preview";
+  createdAt: string;
+  expiresAt: string;
+  patches: CarrierPatch[];
+  rollbackPatches: CarrierPatch[];
+  files: CarrierProjectionFilePreview[];
+  skipped: string[];
+  summary: {
+    files: number;
+    changedFiles: number;
+    additions: number;
+    removals: number;
+  };
+}
+
 const PROJECTION_VERSION = "v2.0";
 const PROJECTION_MARKER_PREFIX = `<!-- memory-fabric projection:${PROJECTION_VERSION} memory:`;
 const SCHEMA_WHITELIST = new Set(["self-model.md", "decision-log.md", "execution-journal.md", "entities-glossary.md"]);
@@ -119,8 +156,93 @@ function patchFor(entry: MemoryEntryV2): CarrierPatch | null {
   };
 }
 
+function diffLines(before: string, after: string): CarrierProjectionDiffLine[] {
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  const max = Math.max(beforeLines.length, afterLines.length);
+  const diff: CarrierProjectionDiffLine[] = [];
+  let oldLineNumber = 1;
+  let newLineNumber = 1;
+
+  for (let i = 0; i < max; i++) {
+    const beforeLine = beforeLines[i];
+    const afterLine = afterLines[i];
+    if (beforeLine === afterLine) {
+      if (beforeLine !== undefined) {
+        diff.push({ type: "context", line: beforeLine, oldLineNumber, newLineNumber });
+        oldLineNumber++;
+        newLineNumber++;
+      }
+      continue;
+    }
+    if (beforeLine !== undefined) {
+      diff.push({ type: "removed", line: beforeLine, oldLineNumber });
+      oldLineNumber++;
+    }
+    if (afterLine !== undefined) {
+      diff.push({ type: "added", line: afterLine, newLineNumber });
+      newLineNumber++;
+    }
+  }
+
+  return compactDiff(diff);
+}
+
+function compactDiff(diff: CarrierProjectionDiffLine[], contextRadius = 3): CarrierProjectionDiffLine[] {
+  const changed = new Set<number>();
+  diff.forEach((line, index) => {
+    if (line.type !== "context") {
+      for (let i = Math.max(0, index - contextRadius); i <= Math.min(diff.length - 1, index + contextRadius); i++) {
+        changed.add(i);
+      }
+    }
+  });
+  return diff.filter((line, index) => line.type !== "context" || changed.has(index)).slice(0, 300);
+}
+
+function projectPreviewContent(filename: string, before: string, patches: CarrierPatch[]): string {
+  let next = before;
+  for (const patch of patches) {
+    const incoming = patch.content.trimEnd();
+    if (!incoming.trim()) continue;
+
+    if (filename === "self-model.md") {
+      const hasManagedBlock = /<!--\s*memory-fabric:begin\b/.test(next);
+      const isTemplate =
+        !hasManagedBlock &&
+        (next.includes("<!-- What is the agent currently trying to accomplish? -->") ||
+          next.length < 200 ||
+          next.includes("Not specified"));
+      if (isTemplate) {
+        next = patch.content;
+      } else if (!next.includes(incoming)) {
+        const ts = new Date().toISOString().slice(0, 10);
+        next = `${next.trimEnd()}\n- [ ] ${incoming} (added: ${ts})\n`;
+      }
+      continue;
+    }
+
+    if (filename === "decision-log.md") {
+      const headerEnd = next.indexOf("\n") + 1;
+      next = `${next.slice(0, headerEnd)}\n${incoming}\n${next.slice(headerEnd)}`;
+      continue;
+    }
+
+    if (filename === "entities-glossary.md") {
+      const existingLines = new Set(next.split("\n").map((line) => line.trim()).filter(Boolean));
+      const lines = incoming.split("\n").map((line) => line.trim()).filter((line) => line && !existingLines.has(line));
+      if (lines.length > 0) next = `${next.trimEnd()}\n${lines.join("\n")}\n`;
+      continue;
+    }
+
+    next = `${next.trimEnd()}\n<!-- appended: preview -->\n${incoming}\n`;
+  }
+  return next;
+}
+
 export class CarrierProjectionEngine {
   private readonly historyPath?: string;
+  private readonly previewPath?: string;
 
   constructor(
     private readonly carriers: CarrierRepository,
@@ -128,6 +250,7 @@ export class CarrierProjectionEngine {
   ) {
     if (cfg) {
       this.historyPath = join(resolveV2BaseDir(cfg), "carrier-projections", "history.jsonl");
+      this.previewPath = join(resolveV2BaseDir(cfg), "carrier-projections", "previews.jsonl");
     }
   }
 
@@ -173,24 +296,7 @@ export class CarrierProjectionEngine {
   }
 
   async apply(opts: { agentId: string; projectId?: string; entries?: MemoryEntryV2[]; patches?: CarrierPatch[] }): Promise<CarrierProjectionRecord> {
-    const rawPatches =
-      opts.patches ??
-      opts.entries
-        ?.map((entry) => (canProject(entry) ? patchFor(entry) : null))
-        .filter((patch): patch is CarrierPatch => patch !== null) ??
-      [];
-    const policySkipped: string[] = [];
-    const patches = rawPatches.filter((patch) => {
-      if (!SCHEMA_WHITELIST.has(patch.filename)) {
-        policySkipped.push(`${patch.filename} (outside projection schema whitelist)`);
-        return false;
-      }
-      if (opts.patches && !hasProjectionOwnership(patch)) {
-        policySkipped.push(`${patch.filename} (missing memory-fabric projection marker)`);
-        return false;
-      }
-      return true;
-    });
+    const { patches, policySkipped } = this.resolvePatches(opts);
     const files = [...new Set(patches.map((patch) => patch.filename))];
     const before = await this.carriers.read({
       agentId: opts.agentId,
@@ -220,6 +326,72 @@ export class CarrierProjectionEngine {
     };
     await this.appendHistory(record);
     return record;
+  }
+
+  async preview(opts: { agentId: string; projectId?: string; entries?: MemoryEntryV2[]; patches?: CarrierPatch[] }): Promise<CarrierProjectionPreviewRecord> {
+    const { patches, policySkipped } = this.resolvePatches(opts);
+    const files = [...new Set(patches.map((patch) => patch.filename))];
+    const before = await this.carriers.read({
+      agentId: opts.agentId,
+      projectId: opts.projectId,
+      files,
+    });
+    const beforeByFile = new Map(before.map((carrier) => [carrier.filename, carrier.content]));
+    const rollbackPatches = before.map((carrier) => ({ filename: carrier.filename, content: carrier.content }));
+    const filePreviews: CarrierProjectionFilePreview[] = [];
+
+    for (const filename of files) {
+      const beforeContent = beforeByFile.get(filename) ?? "";
+      const filePatches = patches.filter((patch) => patch.filename === filename);
+      const afterContent = projectPreviewContent(filename, beforeContent, filePatches);
+      const diff = diffLines(beforeContent, afterContent);
+      filePreviews.push({
+        filename,
+        before: beforeContent,
+        after: afterContent,
+        changed: beforeContent !== afterContent,
+        additions: diff.filter((line) => line.type === "added").length,
+        removals: diff.filter((line) => line.type === "removed").length,
+        diff,
+      });
+    }
+
+    const createdAt = new Date().toISOString();
+    const previewId = `proj_preview_${createHash("sha256")
+      .update(JSON.stringify({ agentId: opts.agentId, projectId: opts.projectId, patches, createdAt }))
+      .digest("hex")
+      .slice(0, 12)}`;
+    const record: CarrierProjectionPreviewRecord = {
+      previewId,
+      agentId: opts.agentId,
+      projectId: opts.projectId,
+      projectionVersion: PROJECTION_VERSION,
+      status: "preview",
+      createdAt,
+      expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      patches,
+      rollbackPatches,
+      files: filePreviews,
+      skipped: policySkipped,
+      summary: {
+        files: filePreviews.length,
+        changedFiles: filePreviews.filter((file) => file.changed).length,
+        additions: filePreviews.reduce((sum, file) => sum + file.additions, 0),
+        removals: filePreviews.reduce((sum, file) => sum + file.removals, 0),
+      },
+    };
+    await this.appendPreview(record);
+    return record;
+  }
+
+  async applyPreview(opts: { previewId: string }): Promise<CarrierProjectionRecord | null> {
+    const preview = (await this.readPreviews()).find((record) => record.previewId === opts.previewId);
+    if (!preview) return null;
+    return this.apply({
+      agentId: preview.agentId,
+      projectId: preview.projectId,
+      patches: preview.patches,
+    });
   }
 
   async rollback(opts: { projectionId: string }): Promise<CarrierProjectionRecord | null> {
@@ -274,5 +446,38 @@ export class CarrierProjectionEngine {
   private async readHistory(): Promise<CarrierProjectionRecord[]> {
     if (!this.historyPath) return [];
     return readJsonl<CarrierProjectionRecord>(this.historyPath);
+  }
+
+  private resolvePatches(opts: { entries?: MemoryEntryV2[]; patches?: CarrierPatch[] }): { patches: CarrierPatch[]; policySkipped: string[] } {
+    const rawPatches =
+      opts.patches ??
+      opts.entries
+        ?.map((entry) => (canProject(entry) ? patchFor(entry) : null))
+        .filter((patch): patch is CarrierPatch => patch !== null) ??
+      [];
+    const policySkipped: string[] = [];
+    const patches = rawPatches.filter((patch) => {
+      if (!SCHEMA_WHITELIST.has(patch.filename)) {
+        policySkipped.push(`${patch.filename} (outside projection schema whitelist)`);
+        return false;
+      }
+      if (opts.patches && !hasProjectionOwnership(patch)) {
+        policySkipped.push(`${patch.filename} (missing memory-fabric projection marker)`);
+        return false;
+      }
+      return true;
+    });
+    return { patches, policySkipped };
+  }
+
+  private async appendPreview(record: CarrierProjectionPreviewRecord): Promise<void> {
+    if (!this.previewPath) return;
+    await ensureFileDir(this.previewPath);
+    await appendJsonl(this.previewPath, record);
+  }
+
+  private async readPreviews(): Promise<CarrierProjectionPreviewRecord[]> {
+    if (!this.previewPath) return [];
+    return readJsonl<CarrierProjectionPreviewRecord>(this.previewPath);
   }
 }

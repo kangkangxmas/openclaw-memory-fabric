@@ -20,13 +20,13 @@
 
 ### Phase 2：v2 Recall 灰度实跑
 
-- `RetrievalPlanner`：输出 intent、layers、preferredTypes、weights 和 reason；entity relation intent 接入 relation graph 排序增强。
+- `RetrievalPlanner`：输出 intent、layers、preferredTypes、weights、reason、filter summary 和 ranking 分解；entity relation intent 接入 relation graph 排序增强。
 - `MemoryCardPackager`：支持去重、token budget、80-160 字默认 card、证据摘要、过期/冲突标记。
 - Recall 对照日志：plugin 在 v2 cards 命中时采样 legacy recall，并写入 `/v2/recall/audit`，不影响本次 v2 注入结果。
 
 ### Phase 3：Carrier 投影治理
 
-- `CarrierProjectionEngine`：支持 drift audit、apply、rollback、history；apply 前记录 rollback snapshot。
+- `CarrierProjectionEngine`：支持 drift audit、preview diff、apply-preview、apply、rollback、history；apply 前记录 rollback snapshot。
 - `CarrierRepository.replace`：提供 rollback 精确恢复能力。
 - 投影白名单：只允许 `self-model.md`、`decision-log.md`、`execution-journal.md`、`entities-glossary.md`。
 - 投影所有权：直接 patch 必须带 `memory-fabric projection:v2.0 memory:<id>` 标记；API apply 只从稳定 memory 生成 patch，非法 patch 进入 `skipped`。
@@ -36,15 +36,16 @@
 
 - `V2RelationGraphService`：支持 `DECIDES`、`IMPLEMENTS`、`SUPERSEDES`、`CAUSES`、`VALIDATES`、`CONSTRAINS` 语义边。
 - Consolidator promotion 同步写入 `VALIDATES`、`SUPERSEDES`、`DECIDES`、`IMPLEMENTS` 关系。
-- `/v2/memories/:id/trace` 返回 source events 和 relation trace。
+- `/v2/memories/:id/trace` 返回 source events、relation trace 和 relation path。
 
 ### Phase 5：Memory Bench、全量灰度与切主
 
 - `MemoryBenchRunner`：内置 30+ v0 cases，可运行、持久化 latest report 和历史 JSONL。
 - `MemoryBenchFixtureSeeder`：可重复把默认、自定义或持久化 fixture cases 写入 L0 event、L1 candidate，并触发 consolidator promotion，避免空库 bench 指标失真。
 - `GET /v2/bench/report`：读取最新报告。
+- `GET /v2/bench/history`：读取历史报告摘要，用于 Inspector 趋势面板。
 - `GET /v2/gray/status`：汇总 mode、worker、candidate stats、recall audit、latest bench 和 readiness flags。
-- V2 Inspector：增加 Candidate Review、Consolidation Worker、Carrier Drift、Projection Apply/Rollback、Relation Trace、Bench Report、Bench Seed 和 Gray Status。
+- V2 Inspector：增加 Candidate Review、Consolidation Worker、Carrier Drift、Projection Preview Diff/Apply/Rollback、Injection Inspector、Relation Trace、Bench Report/History/Seed 和 Gray Status。
 
 ## 3. 后续持续开发计划
 
@@ -116,7 +117,7 @@ pnpm v2:gray-smoke -- \
 - 每次切换前运行 `pnpm v2:commit-smoke -- --strict`；切到单 Agent `v2-write` 后追加 `--require-v2-write --agent-id product --project-id Product`。
 - ConsolidationWorker 默认启动，但只处理 pending，不自动反复处理 needs_review。
 - Candidate review 必须可清空 blocked 状态。
-- Carrier projection 只由稳定 memories apply，直接 patch 必须有投影所有权标记，且每次 apply 可 rollback。
+- Carrier projection 只由稳定 memories preview/apply，直接 patch 必须有投影所有权标记，且每次 apply 可 rollback。
 
 验收：
 - `/commit` response 的 `v2.status` 在 `v2-write` 下必须为 `written`。
@@ -153,6 +154,8 @@ pnpm v2:gray-smoke -- \
 - `GET /v2/consolidation/status`
 - `POST /v2/recall/audit`
 - `GET /v2/recall/audit`
+- `POST /v2/carriers/projection/preview`
+- `POST /v2/carriers/projection/apply-preview`
 - `POST /v2/carriers/projection/apply`
 - `POST /v2/carriers/projection/rollback`
 - `GET /v2/carriers/projection/history`
@@ -165,6 +168,8 @@ pnpm v2:gray-smoke -- \
 - `POST /v2/bench/run`
 - `GET /v2/bench/status`
 - `GET /v2/bench/report`
+- `GET /v2/bench/history`
+- `GET /v2/ops/sensitive-candidates/audit`
 - `pnpm v2:gray-smoke -- ...`
 - `pnpm v2:canary-monitor -- ...`
 
@@ -228,11 +233,15 @@ pnpm v2:canary-monitor -- \
 - 新增 runtime rollout API：`GET /v2/rollout/effective`、`GET /v2/rollout/modes`、`POST /v2/rollout/modes`、`POST /v2/rollout/modes/rollback`。
 - plugin `before_prompt_build` 和 sidecar `/commit` 共用有效模式解析：环境 off 紧急关闭 > Inspector runtime override > 环境 allowlist > 全局模式。
 - Candidate Review 支持按状态筛选、查看 sourceRefs 数量、从 promoted memory 直达 Source Trace。
-- Source Trace 从 raw JSON 升级为结构化证据链视图，覆盖 L0 events、source metadata 和 relation trace。
+- Source Trace 从 raw JSON 升级为结构化证据链视图，覆盖 L0 events、source metadata、relation trace 和 relation path。
+- Injection Inspector 展示 recall plan、过滤摘要、ranking 分解、sourceRefs 数量和 selected 状态。
+- Carrier Projection 使用 preview diff -> apply-preview 两步流，不再直接从按钮 apply。
+- 敏感候选治理默认 reject candidate 并 retract promoted memory，写入 audit log；硬删除仅保留为显式参数。
+- Bench Report 展示历史趋势和失败 case drilldown。
 - Bench seed / fixture seed 已从顶部主操作移到 Bench Tools，降低误写真实 Agent 的风险。
 - 详细 Web 审计和后续优化项见 `docs/web-v2-inspector-audit.md`。
 
-第 4 项（Carrier 投影治理）基础能力已启动：Inspector 已能展示 projection policy、schema whitelist、projection history，并可对历史 projection 执行 rollback。下一步不再扩展任意写入面，而是把 apply/rollback 升级为 patch diff 审阅。
+第 4 项（Carrier 投影治理）已升级为可审阅 preview diff：Inspector 能展示 projection policy、schema whitelist、preview diff、apply-preview、projection history，并可对历史 projection 执行 rollback。
 
 继续增强 Carrier 投影治理前应满足：
 
@@ -245,7 +254,7 @@ pnpm v2:canary-monitor -- \
 - `development` Agent 在 `v2-recall` 下稳定使用至少一个真实开发周期。
 - `/v2/recall/audit` 中 v2 card count、evidence count、legacy source count 没有持续异常。
 - Candidate queue 无不可解释积压；needs_review 都有 reviewReason。
-- Carrier projection 每次 apply 都有 rollback record。
+- Carrier projection 每次 apply 前先 preview diff，apply 后都有 rollback record。
 - Bench 达到验收门槛。
 - 旧 `/recall`、旧 Carrier、旧 JSONL 回退路径已验证。
 

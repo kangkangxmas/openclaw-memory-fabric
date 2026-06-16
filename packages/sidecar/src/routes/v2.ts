@@ -27,6 +27,7 @@ import { V2RelationGraphService, type V2RelationType } from "../services/v2-rela
 import { RecallAuditLogService } from "../services/recall-audit-log-service.js";
 import { V2RolloutConfigService } from "../services/v2-rollout-config-service.js";
 import { ContextHealthReporter } from "../services/context-health-reporter.js";
+import { SensitiveCandidateAuditService } from "../services/sensitive-candidate-audit-service.js";
 import type { CarrierRepository } from "../services/carrier-service.js";
 import { isV2RecallReady, parseV2Mode, resolveV2ModeFromEnv, type V2Mode } from "../utils/v2-mode.js";
 
@@ -52,6 +53,7 @@ export function registerV2Routes(
   const relationGraph = new V2RelationGraphService(cfg);
   const recallAudit = new RecallAuditLogService(cfg);
   const contextHealth = new ContextHealthReporter();
+  const sensitiveAudit = new SensitiveCandidateAuditService(cfg);
   const consolidator = new MemoryConsolidator(cfg, atomicStore, relationGraph);
   const consolidationWorker = new ConsolidationWorker(atomicStore, consolidator);
   const retrievalPlanner = new RetrievalPlanner(core, relationGraph);
@@ -567,14 +569,35 @@ export function registerV2Routes(
         const event = agentEvents.find((item) => item.eventId === ref);
         if (event) events.push(event);
       }
+      const relations = await relationGraph.list({ memoryId: entry.id, agentId: entry.agentId, projectId: entry.projectId, limit: 100 });
       return {
         ok: true,
         memoryId: entry.id,
         status: entry.status ?? "active",
+        entry: {
+          id: entry.id,
+          type: entry.type,
+          contentPreview: entry.content.slice(0, 240),
+          agentId: entry.agentId,
+          projectId: entry.projectId,
+          validFrom: entry.validFrom,
+          validUntil: entry.validUntil,
+          supersedes: entry.supersedes ?? [],
+          quality: entry.quality,
+        },
         sourceRefs,
         sources: entry.sources ?? [],
         events,
-        relations: await relationGraph.list({ memoryId: entry.id, agentId: entry.agentId, projectId: entry.projectId, limit: 100 }),
+        relations,
+        relationPaths: relations.map((relation) => ({
+          relationId: relation.relationId,
+          type: relation.type,
+          direction: relation.sourceId === entry.id ? "outgoing" : "incoming",
+          source: `${relation.sourceKind}:${relation.sourceId}`,
+          target: `${relation.targetKind}:${relation.targetId}`,
+          confidence: relation.confidence,
+          evidenceRefs: relation.evidenceRefs,
+        })),
       };
     }
   );
@@ -1059,6 +1082,39 @@ export function registerV2Routes(
 
   app.post<{
     Body: { agentId: string; projectId?: string; memoryIds?: string[]; limit?: number };
+  }>("/v2/carriers/projection/preview", async (request) => {
+    if (!projection) {
+      return { ok: false, error: "Carrier repository is not configured" };
+    }
+    const entries = request.body.memoryIds && request.body.memoryIds.length > 0
+      ? (await Promise.all(request.body.memoryIds.map((id) => core.read(id)))).filter((entry): entry is MemoryEntryV2 => !!entry)
+      : (await core.query({
+          agentId: request.body.agentId,
+          projectId: request.body.projectId,
+          includeExpired: false,
+          limit: Math.max(1, Math.min(Number(request.body.limit ?? 100), 500)),
+        })).entries;
+    const preview = await projection.preview({
+      agentId: request.body.agentId,
+      projectId: request.body.projectId,
+      entries,
+    });
+    return { ok: true, preview };
+  });
+
+  app.post<{
+    Body: { previewId: string };
+  }>("/v2/carriers/projection/apply-preview", async (request) => {
+    if (!projection) {
+      return { ok: false, error: "Carrier repository is not configured" };
+    }
+    const record = await projection.applyPreview({ previewId: request.body.previewId });
+    if (!record) return { ok: false, error: "Projection preview not found" };
+    return { ok: true, projection: record };
+  });
+
+  app.post<{
+    Body: { agentId: string; projectId?: string; memoryIds?: string[]; limit?: number };
   }>("/v2/carriers/projection/apply", async (request) => {
     if (!projection) {
       return { ok: false, error: "Carrier repository is not configured" };
@@ -1205,9 +1261,19 @@ export function registerV2Routes(
   });
 
   app.post<{
-    Body: { agentId?: string; projectId?: string; status?: string[]; limit?: number; deletePromotedMemories?: boolean };
+    Body: {
+      agentId?: string;
+      projectId?: string;
+      status?: string[];
+      statuses?: string[];
+      limit?: number;
+      action?: "reject" | "quarantine";
+      retractPromotedMemories?: boolean;
+      deletePromotedMemories?: boolean;
+    };
   }>("/v2/ops/sensitive-candidates/reject", async (request) => {
-    const statuses = request.body.status?.filter((item): item is AtomicMemoryCandidate["status"] =>
+    const requestedStatuses = request.body.status ?? request.body.statuses;
+    const statuses = requestedStatuses?.filter((item): item is AtomicMemoryCandidate["status"] =>
       candidateStatuses.includes(item as AtomicMemoryCandidate["status"])
     );
     const candidates = await atomicStore.listAll({
@@ -1217,8 +1283,10 @@ export function registerV2Routes(
       limit: request.body.limit ?? 10_000,
     });
     let rejected = 0;
+    let retractedMemories = 0;
     let deletedMemories = 0;
-    const affected: Array<{ candidateId: string; reason: string; promotedMemoryId?: string }> = [];
+    const affected: Array<{ candidateId: string; reason: string; promotedMemoryId?: string; memoryStatus?: string }> = [];
+    const retractPromotedMemories = request.body.retractPromotedMemories ?? !request.body.deletePromotedMemories;
     for (const candidate of candidates) {
       const reason = sensitiveReason(candidate.content);
       if (!reason) continue;
@@ -1230,12 +1298,82 @@ export function registerV2Routes(
         reason: `sensitive_candidate:${reason}`,
       });
       if (updated) rejected++;
-      if (request.body.deletePromotedMemories && candidate.promotedMemoryId && await core.delete(candidate.promotedMemoryId)) {
-        deletedMemories++;
+      let memoryStatus: string | undefined;
+      let previousMemoryStatus: string | undefined;
+      if (candidate.promotedMemoryId) {
+        const existingMemory = await core.read(candidate.promotedMemoryId);
+        previousMemoryStatus = existingMemory?.status ?? "active";
+        if (request.body.deletePromotedMemories && await core.delete(candidate.promotedMemoryId)) {
+          deletedMemories++;
+          memoryStatus = "deleted";
+          await sensitiveAudit.append({
+            action: "delete",
+            agentId: candidate.agentId,
+            projectId: candidate.projectId,
+            candidateId: candidate.candidateId,
+            reason,
+            promotedMemoryId: candidate.promotedMemoryId,
+            previousMemoryStatus,
+            newMemoryStatus: "deleted",
+            reviewedBy: "inspector",
+          });
+        } else if (retractPromotedMemories && existingMemory) {
+          const retracted = await core.update(candidate.promotedMemoryId, {
+            status: "retracted",
+            validUntil: new Date().toISOString(),
+            metadata: {
+              tags: ["quarantined_sensitive", `sensitive_reason:${reason}`],
+              custom: {
+                ...(existingMemory.metadata.custom ?? {}),
+                quarantineReason: reason,
+                quarantineCandidateId: candidate.candidateId,
+                quarantinedAt: new Date().toISOString(),
+              },
+            },
+          });
+          if (retracted) {
+            retractedMemories++;
+            memoryStatus = retracted.status;
+            await sensitiveAudit.append({
+              action: request.body.action === "quarantine" ? "quarantine" : "retract",
+              agentId: candidate.agentId,
+              projectId: candidate.projectId,
+              candidateId: candidate.candidateId,
+              reason,
+              promotedMemoryId: candidate.promotedMemoryId,
+              previousMemoryStatus,
+              newMemoryStatus: retracted.status,
+              reviewedBy: "inspector",
+            });
+          }
+        }
       }
-      affected.push({ candidateId: candidate.candidateId, reason, promotedMemoryId: candidate.promotedMemoryId });
+      await sensitiveAudit.append({
+        action: request.body.action === "quarantine" ? "quarantine" : "reject",
+        agentId: candidate.agentId,
+        projectId: candidate.projectId,
+        candidateId: candidate.candidateId,
+        reason,
+        promotedMemoryId: candidate.promotedMemoryId,
+        previousMemoryStatus,
+        newMemoryStatus: memoryStatus,
+        reviewedBy: "inspector",
+      });
+      affected.push({ candidateId: candidate.candidateId, reason, promotedMemoryId: candidate.promotedMemoryId, memoryStatus });
     }
-    return { ok: true, checked: candidates.length, rejected, deletedMemories, affected };
+    return { ok: true, checked: candidates.length, rejected, retractedMemories, deletedMemories, affected };
+  });
+
+  app.get<{
+    Querystring: { agentId?: string; projectId?: string; candidateId?: string; limit?: number };
+  }>("/v2/ops/sensitive-candidates/audit", async (request) => {
+    const entries = await sensitiveAudit.list({
+      agentId: request.query.agentId,
+      projectId: request.query.projectId,
+      candidateId: request.query.candidateId,
+      limit: Number(request.query.limit ?? 100),
+    });
+    return { ok: true, entries, count: entries.length };
   });
 
   app.get("/v2/ops/acceptance/status", async () => {
@@ -1389,6 +1527,13 @@ export function registerV2Routes(
   app.get("/v2/bench/report", async () => {
     const report = await benchRunner.latest();
     return { ok: true, report };
+  });
+
+  app.get<{
+    Querystring: { limit?: number };
+  }>("/v2/bench/history", async (request) => {
+    const history = await benchRunner.history({ limit: Number(request.query.limit ?? 20) });
+    return { ok: true, history, count: history.length };
   });
 
   app.get("/v2/bench/fixtures", async () => {

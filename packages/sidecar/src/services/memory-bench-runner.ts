@@ -2,7 +2,7 @@ import { readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import type { SidecarConfig } from "../config/index.js";
-import { appendJsonl, ensureFileDir } from "../utils/jsonl.js";
+import { appendJsonl, ensureFileDir, readJsonl } from "../utils/jsonl.js";
 import { resolveV2BaseDir } from "../utils/v2-paths.js";
 import type { RetrievalPlanner } from "./retrieval-planner.js";
 
@@ -59,7 +59,14 @@ export interface MemoryBenchReport {
   results: Array<{
     id: string;
     hit: boolean;
+    expectedTerms?: string[];
+    matchedTerms?: string[];
+    missingTerms?: string[];
+    planIntent?: string;
     cardCount: number;
+    evidenceCount?: number;
+    cardMemoryIds?: string[];
+    cardPreviews?: string[];
     latencyMs: number;
     status: "pass" | "miss" | "timeout" | "error";
     error?: string;
@@ -388,6 +395,16 @@ export class MemoryBenchRunner {
     return JSON.parse(await readFile(this.latestPath, "utf8")) as MemoryBenchReport;
   }
 
+  async history(opts: { limit?: number } = {}): Promise<MemoryBenchReportSummary[]> {
+    if (!this.historyPath || !existsSync(this.historyPath)) return [];
+    const limit = Math.max(1, Math.min(opts.limit ?? 20, 200));
+    return (await readJsonl<MemoryBenchReport>(this.historyPath))
+      .sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime())
+      .slice(0, limit)
+      .map((report) => summarizeReport(report))
+      .filter((report): report is MemoryBenchReportSummary => report !== null);
+  }
+
   async status(): Promise<MemoryBenchStatus> {
     return {
       state: this.activeRun ? "running" : "idle",
@@ -474,13 +491,24 @@ export class MemoryBenchRunner {
     }
 
     const haystack = outcome.recall.cards.map((card) => card.content).join("\n").toLowerCase();
-    const hit = benchCase.expectedTerms.some((term) => haystack.includes(term.toLowerCase()));
+    const expectedTerms = benchCase.expectedTerms.filter(Boolean);
+    const matchedTerms = expectedTerms.filter((term) => haystack.includes(term.toLowerCase()));
+    const missingTerms = expectedTerms.filter((term) => !matchedTerms.includes(term));
+    const hit = matchedTerms.length > 0;
+    const evidenceRefs = new Set(outcome.recall.cards.flatMap((card) => card.evidence));
     return {
       recall: outcome.recall,
       result: {
         id: benchCase.id,
         hit,
+        expectedTerms,
+        matchedTerms,
+        missingTerms,
+        planIntent: outcome.recall.plan.intent,
         cardCount: outcome.recall.cards.length,
+        evidenceCount: evidenceRefs.size,
+        cardMemoryIds: outcome.recall.cards.map((card) => card.memoryId),
+        cardPreviews: outcome.recall.cards.map((card) => card.content.slice(0, 160)),
         latencyMs,
         status: hit ? "pass" : "miss",
       },
