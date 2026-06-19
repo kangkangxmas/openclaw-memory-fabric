@@ -35,7 +35,7 @@ v2 的关键边界：
 
 - L0 event ledger 是 append-only 证据账本，记录消息、工具调用、文件摘要、diff、附件摘要、运行时错误和状态。
 - L1 candidate queue 是低风险写入入口；没有 `sourceRefs` 的内容只能停留在 `needs_review` 或 `rejected`。
-- `MemoryConsolidator` 负责 promotion、去重、冲突检测、`supersedes`、`validUntil`、质量评分和 relation graph 写入。
+- `ConsolidationWorker` 可按单 Agent/Project 兼容运行，也可按 `scopes` 覆盖多个 `v2-write` Agent/Project；`MemoryConsolidator` 负责 promotion、去重、冲突检测、`supersedes`、`validUntil`、质量评分和 relation graph 写入。
 - `RetrievalPlanner` 负责可解释检索计划和 Hybrid RRF，`MemoryCardPackager` 只向 prompt 注入 evidence-backed memory cards。
 - Carrier 是结构化记忆的 Markdown 投影，不再作为唯一事实源；projection 默认走 preview diff -> apply-preview，两步流；apply 前记录 rollback patch，并要求 patch 属于 schema whitelist 且带 `memory-fabric projection` 所有权标记，可审计和回滚。
 - `V2RelationGraphService` 从共现图升级为语义关系图，支持 `DECIDES`、`IMPLEMENTS`、`SUPERSEDES`、`CAUSES`、`VALIDATES`、`CONSTRAINS`。
@@ -433,6 +433,7 @@ React 18 + Vite + TypeScript + Tailwind CSS 构建的 SPA，通过 `@fastify/sta
 | `MEMORY_FABRIC_CONSOLIDATION_WORKER` | 是否随 sidecar 自动启动巩固 worker；默认关闭，`auto/on/true/1` 开启 | `auto` |
 | `MEMORY_FABRIC_CONSOLIDATION_AGENT_ID` | 自动 worker 可选 Agent 过滤 | `development` |
 | `MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID` | 自动 worker 可选 Project 过滤 | `openclaw-memory-fabric` |
+| `MEMORY_FABRIC_CONSOLIDATION_INCLUDE_V2_WRITE_SCOPES` | 自动 worker 启动时是否纳入 rollout 中所有 `v2-write` scope | `true` |
 | `MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS` | 自动 worker 运行间隔 | `30000` |
 | `MEMORY_FABRIC_CONSOLIDATION_LIMIT` | 自动 worker 每轮处理上限 | `100` |
 

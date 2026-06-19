@@ -315,6 +315,10 @@ export interface V2ConsolidationStatus {
   limit: number;
   agentId?: string;
   projectId?: string;
+  scopes?: Array<{
+    agentId: string;
+    projectId?: string;
+  }>;
   startedAt?: string;
   stoppedAt?: string;
   lastRunAt?: string;
@@ -323,6 +327,13 @@ export interface V2ConsolidationStatus {
   errorCount: number;
   lastError?: string;
   lastResult?: Record<string, unknown>;
+  lastScopeResults?: Array<{
+    agentId: string;
+    projectId?: string;
+    result?: Record<string, unknown>;
+    error?: string;
+    lastRunAt: string;
+  }>;
 }
 
 export interface CarrierDriftIssue {
@@ -720,6 +731,9 @@ export interface V2RolloutModeRow {
   health?: {
     status: "ready" | "warn" | "fail";
     warnings: string[];
+    blockingReasons?: string[];
+    preflightStatus?: "ready" | "warn" | "blocked";
+    rolloutOrderHint?: "main_agent_last";
     candidateSourceCoverage: number;
     sourceLessCandidates: number;
     candidateQueueHealthy: boolean;

@@ -212,10 +212,19 @@ export const api = {
       ].filter(Boolean).join("&").replace(/^(.+)$/, "?$1")}`,
     ),
 
-  startV2ConsolidationWorker: (agentId?: string, projectId?: string) =>
+  startV2ConsolidationWorker: (
+    agentId?: string,
+    projectId?: string,
+    options?: {
+      includeV2WriteScopes?: boolean;
+      scopes?: Array<{ agentId: string; projectId?: string }>;
+    },
+  ) =>
     post<{ ok: boolean; status: V2ConsolidationStatus }>("/v2/consolidation/worker/start", {
       agentId,
       projectId,
+      includeV2WriteScopes: options?.includeV2WriteScopes,
+      scopes: options?.scopes,
       intervalMs: 30_000,
       limit: 100,
     }),

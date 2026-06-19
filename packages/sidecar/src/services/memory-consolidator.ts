@@ -54,11 +54,34 @@ function hasExplicitUserDirective(candidate: AtomicMemoryCandidate): boolean {
   return candidate.tags.some((tag) => tag === "explicit_user_instruction" || tag === "user_directive");
 }
 
+function hasManualApproval(candidate: AtomicMemoryCandidate): boolean {
+  return candidate.tags.includes("manual_review_approved");
+}
+
 function passesHighTrustGate(candidate: AtomicMemoryCandidate): boolean {
   if (candidate.type !== "profile" && candidate.type !== "intent") return true;
   if (hasExplicitUserDirective(candidate) && candidate.confidence >= 0.7) return true;
-  if (candidate.tags.includes("manual_review_approved") && candidate.confidence >= 0.7) return true;
+  if (hasManualApproval(candidate) && candidate.confidence >= 0.7) return true;
   return candidate.sourceRefs.length >= 2 && candidate.confidence >= 0.8 && aggregateQuality(candidate.quality) >= 0.75;
+}
+
+function lowSignalReason(candidate: AtomicMemoryCandidate): string | null {
+  if (hasManualApproval(candidate) || hasExplicitUserDirective(candidate)) return null;
+  if (candidate.type === "entity" || candidate.type === "profile" || candidate.type === "intent") return null;
+
+  const content = candidate.content.trim();
+  const normalizedText = normalize(content);
+  const words = normalizedText.split(" ").filter(Boolean);
+  const hasCjk = /\p{Script=Han}/u.test(content);
+  if (content.length < 8) return "low_signal_too_short";
+  if (words.length > 0 && words.length <= 4 && (!hasCjk || content.length < 10)) return "low_signal_too_short";
+  if (/^[`*_#>—–,.;:，。；：、)\]}]/u.test(content)) return "low_signal_fragment_prefix";
+  if (/^[的了和与及或但而]/u.test(content)) return "low_signal_fragment_prefix";
+  if (/[`*_#(\[{]$/u.test(content)) return "low_signal_fragment_suffix";
+  if (/^(that|which|where|when|while|because|during|happening|buried|from|to|in|on|with)\b/i.test(normalizedText)) {
+    return "low_signal_fragment_clause";
+  }
+  return null;
 }
 
 export class MemoryConsolidator {
@@ -103,6 +126,16 @@ export class MemoryConsolidator {
       if (candidate.confidence < 0.45 || qualityScore < 0.45) {
         candidate.status = "needs_review";
         candidate.reviewReason = "quality_below_threshold";
+        await this.candidates.update(candidate);
+        result.needsReview++;
+        result.entries.push({ candidateId: candidate.candidateId, status: candidate.status, reason: candidate.reviewReason });
+        continue;
+      }
+
+      const signalReason = lowSignalReason(candidate);
+      if (signalReason) {
+        candidate.status = "needs_review";
+        candidate.reviewReason = signalReason;
         await this.candidates.update(candidate);
         result.needsReview++;
         result.entries.push({ candidateId: candidate.candidateId, status: candidate.status, reason: candidate.reviewReason });

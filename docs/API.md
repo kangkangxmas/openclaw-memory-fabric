@@ -213,14 +213,28 @@ Query:
 
 ### POST /v2/consolidation/worker/start
 
-启动后台巩固 worker。
+启动后台巩固 worker。旧版单 scope 参数仍兼容；多 Agent 灰度时优先使用 `scopes` 或 `includeV2WriteScopes`，让同一个 worker 覆盖所有已进入 `v2-write` 的 Agent/Project。
 
-默认不会随 sidecar 启动自动运行。需要开机自动处理 pending candidates 时设置 `MEMORY_FABRIC_CONSOLIDATION_WORKER=auto`，并可选配置 `MEMORY_FABRIC_CONSOLIDATION_AGENT_ID`、`MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID`、`MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS`、`MEMORY_FABRIC_CONSOLIDATION_LIMIT`。
+默认不会随 sidecar 启动自动运行。需要开机自动处理 pending candidates 时设置 `MEMORY_FABRIC_CONSOLIDATION_WORKER=auto`，并可选配置 `MEMORY_FABRIC_CONSOLIDATION_AGENT_ID`、`MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID`、`MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS`、`MEMORY_FABRIC_CONSOLIDATION_LIMIT`。设置 `MEMORY_FABRIC_CONSOLIDATION_INCLUDE_V2_WRITE_SCOPES=true` 后，自动 worker 会把当前 rollout 配置中所有 `v2-write` scope 一并纳入处理范围。
 
 ```json
 {
   "agentId": "development",
   "projectId": "openclaw-memory-fabric",
+  "intervalMs": 30000,
+  "limit": 100
+}
+```
+
+多 scope 示例：
+
+```json
+{
+  "includeV2WriteScopes": true,
+  "scopes": [
+    { "agentId": "product", "projectId": "Product" },
+    { "agentId": "ops", "projectId": "Ops" }
+  ],
   "intervalMs": 30000,
   "limit": 100
 }
@@ -232,7 +246,7 @@ Query:
 
 ### GET /v2/consolidation/status
 
-返回 worker 状态和 candidate stats。
+返回 worker 状态和 candidate stats。`worker.scopes` 表示当前 worker 覆盖的多 Agent/Project 范围；旧版单 scope 启动时仍会返回 `worker.agentId` / `worker.projectId`。
 
 ### GET /v2/gray/status
 
@@ -281,6 +295,10 @@ Response 包含：
 
 - `defaultMode`：全局环境默认模式
 - `modes[]`：每个 Agent/Project 的有效模式、来源、候选队列、recall audit 和 worker 命中状态
+  - `health.status`：`ready`、`warn` 或 `fail`
+  - `health.preflightStatus`：`ready`、`warn` 或 `blocked`，用于晋级前判断
+  - `health.blockingReasons[]`：会阻断晋级的原因，例如 `candidate_queue_unhealthy`、`candidate_source_refs_low`、`worker_scope_missing`
+  - `health.warnings[]`：不一定阻断晋级的提示，例如 `worker_preflight_not_active`、`recall_audit_missing`、`main_agent_last_to_promote`
 - `overrides[]`：当前持久化 runtime override 列表
 
 ### POST /v2/rollout/modes
@@ -333,6 +351,11 @@ Response 包含：
 - `bench`：最新 bench report，可能为 `null`
 - `checks`：逐项巡检结果。`fail` 用于阻断继续扩灰；`warn` 用于提示还缺真实流量或 bench。
 
+`worker_scope` 语义：
+
+- `v2-write` scope 必须被 `ConsolidationWorker` 覆盖；worker 已运行但未覆盖时为 `fail`。
+- `v2-recall` scope 属于晋级前预检；未被 worker 覆盖时为 `warn`，用于提示切写入前需要启动 worker，不作为 recall 阶段硬失败。
+
 命令行巡检：
 
 ```bash
@@ -365,7 +388,7 @@ Response 包含：
 
 ### POST /v2/recall/audit
 
-记录 legacy recall 与 v2 recall 对照日志。plugin 在 `MEMORY_FABRIC_V2_MODE=v2-recall|v2-write` 且 v2 cards 命中时调用。
+记录 legacy recall 与 v2 recall 对照日志。plugin 在有效模式为 `v2-recall|v2-write` 且 v2 recall 路径被尝试时调用；当 v2 未命中 memory cards 时也会记录 audit，`v2.cardCount=0`，并继续使用 legacy recall 作为 prompt fallback。
 
 Payload 可包含：
 

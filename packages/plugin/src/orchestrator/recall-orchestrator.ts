@@ -1,4 +1,4 @@
-import type { SidecarClient } from "../utils/sidecar-client.js";
+import type { RecallResponse, SidecarClient } from "../utils/sidecar-client.js";
 import type { MemoryFabricConfig, RecallDepth, MemoryScope, TaskType } from "../types/index.js";
 import type { MetricsCollector } from "../utils/metrics.js";
 import {
@@ -177,6 +177,7 @@ export class RecallOrchestrator {
   async execute(ctx: RecallContext): Promise<MemoryBriefResult> {
     const recallPlan = this.plan(ctx);
     let v2Mode = parseLocalV2Mode();
+    let fallbackRecallResp: RecallResponse | undefined;
 
     try {
       v2Mode = (await this.client.v2RolloutEffective(ctx.agentId, ctx.projectId)).mode;
@@ -193,78 +194,79 @@ export class RecallOrchestrator {
           query: recallPlan.query,
           limit: recallPlan.depth === "l2" ? 8 : 5,
         });
-        if (v2.cards.length > 0) {
-          const evidence = [...new Set(v2.cards.flatMap((card) => card.evidence))];
-          let legacyForAudit:
-            | {
-                sourceCount?: number;
-                budgetUsed?: number;
-                memoryBriefChars?: number;
-                sources?: string[];
-                memoryBriefPreview?: string;
-              }
-            | undefined;
-          try {
-            const legacy = await this.client.recall({
-              agentId: ctx.agentId,
-              projectId: ctx.projectId,
-              scope: recallPlan.scope,
-              depth: recallPlan.depth,
-              query: recallPlan.query,
-              taskType: recallPlan.taskType
-            });
-            legacyForAudit = {
-              sourceCount: legacy.sources.length,
-              budgetUsed: legacy.budgetUsed,
-              memoryBriefChars: legacy.memoryBrief.length,
-              sources: legacy.sources.slice(0, 12),
-              memoryBriefPreview: preview(legacy.memoryBrief)
-            };
-          } catch {
-            legacyForAudit = undefined;
-          }
-          const auditClient = this.client as unknown as {
-            recallAudit?: (req: {
-              agentId?: string;
-              projectId?: string;
-              query: string;
-              mode: string;
-              legacy?: {
-                sourceCount?: number;
-                budgetUsed?: number;
-                memoryBriefChars?: number;
-                sources?: string[];
-                memoryBriefPreview?: string;
-              };
-              v2?: {
-                intent?: string;
-                cardCount?: number;
-                evidenceCount?: number;
-                renderedChars?: number;
-                executionTimeMs?: number;
-                memoryIds?: string[];
-                evidenceRefs?: string[];
-                cardPreviews?: string[];
-              };
-            }) => Promise<unknown>;
-          };
-          void auditClient.recallAudit?.({
+        const evidence = [...new Set(v2.cards.flatMap((card) => card.evidence))];
+        let legacyForAudit:
+          | {
+              sourceCount?: number;
+              budgetUsed?: number;
+              memoryBriefChars?: number;
+              sources?: string[];
+              memoryBriefPreview?: string;
+            }
+          | undefined;
+        try {
+          fallbackRecallResp = await this.client.recall({
             agentId: ctx.agentId,
             projectId: ctx.projectId,
+            scope: recallPlan.scope,
+            depth: recallPlan.depth,
             query: recallPlan.query,
-            mode: v2Mode,
-            legacy: legacyForAudit,
-            v2: {
-              intent: v2.plan.intent,
-              cardCount: v2.cards.length,
-              evidenceCount: evidence.length,
-              renderedChars: v2.rendered.length,
-              executionTimeMs: v2.executionTimeMs,
-              memoryIds: v2.cards.map((card) => card.memoryId).slice(0, 12),
-              evidenceRefs: evidence.slice(0, 24),
-              cardPreviews: v2.cards.map((card) => preview(card.content)).slice(0, 8)
-            }
-          }).catch(() => undefined);
+            taskType: recallPlan.taskType
+          });
+          legacyForAudit = {
+            sourceCount: fallbackRecallResp.sources.length,
+            budgetUsed: fallbackRecallResp.budgetUsed,
+            memoryBriefChars: fallbackRecallResp.memoryBrief.length,
+            sources: fallbackRecallResp.sources.slice(0, 12),
+            memoryBriefPreview: preview(fallbackRecallResp.memoryBrief)
+          };
+        } catch {
+          legacyForAudit = undefined;
+        }
+        const auditClient = this.client as unknown as {
+          recallAudit?: (req: {
+            agentId?: string;
+            projectId?: string;
+            query: string;
+            mode: string;
+            legacy?: {
+              sourceCount?: number;
+              budgetUsed?: number;
+              memoryBriefChars?: number;
+              sources?: string[];
+              memoryBriefPreview?: string;
+            };
+            v2?: {
+              intent?: string;
+              cardCount?: number;
+              evidenceCount?: number;
+              renderedChars?: number;
+              executionTimeMs?: number;
+              memoryIds?: string[];
+              evidenceRefs?: string[];
+              cardPreviews?: string[];
+            };
+          }) => Promise<unknown>;
+        };
+        void auditClient.recallAudit?.({
+          agentId: ctx.agentId,
+          projectId: ctx.projectId,
+          query: recallPlan.query,
+          mode: v2Mode,
+          legacy: legacyForAudit,
+          v2: {
+            intent: v2.plan.intent,
+            cardCount: v2.cards.length,
+            evidenceCount: evidence.length,
+            renderedChars: v2.rendered.length,
+            executionTimeMs: v2.executionTimeMs,
+            memoryIds: v2.cards.map((card) => card.memoryId).slice(0, 12),
+            evidenceRefs: evidence.slice(0, 24),
+            cardPreviews: v2.cards.map((card) => preview(card.content)).slice(0, 8)
+          }
+        }).catch(() => undefined);
+
+        if (v2.cards.length > 0) {
           return {
             brief: v2.rendered,
             sources: [`v2:recall-plan:${v2.plan.intent}`, ...evidence.map((ref) => `event:${ref}`)],
@@ -278,14 +280,16 @@ export class RecallOrchestrator {
     }
 
     // Primary recall from OpenViking
-    const recallResp = await this.client.recall({
-      agentId: ctx.agentId,
-      projectId: ctx.projectId,
-      scope: recallPlan.scope,
-      depth: recallPlan.depth,
-      query: recallPlan.query,
-      taskType: recallPlan.taskType
-    });
+    const recallResp =
+      fallbackRecallResp ??
+      await this.client.recall({
+        agentId: ctx.agentId,
+        projectId: ctx.projectId,
+        scope: recallPlan.scope,
+        depth: recallPlan.depth,
+        query: recallPlan.query,
+        taskType: recallPlan.taskType
+      });
 
     const sources = [...recallResp.sources];
     let structuralSection = "";

@@ -1,12 +1,24 @@
 import type { AtomicMemoryCandidate, AtomicMemoryStore } from "./atomic-memory-store.js";
 import type { MemoryConsolidator, ConsolidationResult } from "./memory-consolidator.js";
 
+export interface ConsolidationWorkerScope {
+  agentId: string;
+  projectId?: string;
+}
+
+export interface ConsolidationWorkerScopeResult extends ConsolidationWorkerScope {
+  result?: ConsolidationResult;
+  error?: string;
+  lastRunAt: string;
+}
+
 export interface ConsolidationWorkerStatus {
   running: boolean;
   intervalMs: number;
   limit: number;
   agentId?: string;
   projectId?: string;
+  scopes?: ConsolidationWorkerScope[];
   startedAt?: string;
   stoppedAt?: string;
   lastRunAt?: string;
@@ -15,6 +27,7 @@ export interface ConsolidationWorkerStatus {
   errorCount: number;
   lastError?: string;
   lastResult?: ConsolidationResult;
+  lastScopeResults?: ConsolidationWorkerScopeResult[];
 }
 
 export interface ConsolidationWorkerStartOptions {
@@ -22,6 +35,7 @@ export interface ConsolidationWorkerStartOptions {
   limit?: number;
   agentId?: string;
   projectId?: string;
+  scopes?: ConsolidationWorkerScope[];
 }
 
 function clampLimit(value: number | undefined): number {
@@ -30,6 +44,21 @@ function clampLimit(value: number | undefined): number {
 
 function clampInterval(value: number | undefined): number {
   return Math.max(1_000, Math.min(value ?? 30_000, 24 * 60 * 60 * 1000));
+}
+
+function scopeKey(scope: ConsolidationWorkerScope): string {
+  return `${scope.agentId}:${scope.projectId ?? ""}`;
+}
+
+function normalizeScopes(opts: ConsolidationWorkerStartOptions): ConsolidationWorkerScope[] | undefined {
+  const scoped = new Map<string, ConsolidationWorkerScope>();
+  for (const scope of opts.scopes ?? []) {
+    if (!scope.agentId) continue;
+    scoped.set(scopeKey(scope), { agentId: scope.agentId, projectId: scope.projectId });
+  }
+  if (scoped.size > 0) return [...scoped.values()];
+  if (opts.agentId) return [{ agentId: opts.agentId, projectId: opts.projectId }];
+  return undefined;
 }
 
 export class ConsolidationWorker {
@@ -50,16 +79,20 @@ export class ConsolidationWorker {
 
   start(opts: ConsolidationWorkerStartOptions = {}): ConsolidationWorkerStatus {
     if (this.timer) clearInterval(this.timer);
+    const scopes = normalizeScopes(opts);
+    const intervalMs = clampInterval(opts.intervalMs);
+    const legacyScope = scopes && scopes.length === 1 ? scopes[0] : undefined;
     this.state = {
       ...this.state,
       running: true,
-      intervalMs: clampInterval(opts.intervalMs),
+      intervalMs,
       limit: clampLimit(opts.limit),
-      agentId: opts.agentId,
-      projectId: opts.projectId,
+      agentId: scopes ? legacyScope?.agentId : opts.agentId,
+      projectId: scopes ? legacyScope?.projectId : opts.projectId,
+      scopes,
       startedAt: new Date().toISOString(),
       stoppedAt: undefined,
-      nextRunAt: new Date(Date.now() + clampInterval(opts.intervalMs)).toISOString(),
+      nextRunAt: new Date(Date.now() + intervalMs).toISOString(),
     };
     this.timer = setInterval(() => {
       void this.runOnce();
@@ -89,16 +122,10 @@ export class ConsolidationWorker {
     if (this.inFlight) return this.status();
     this.inFlight = true;
     const limit = clampLimit(opts.limit ?? this.state.limit);
-    const agentId = opts.agentId ?? this.state.agentId;
-    const projectId = opts.projectId ?? this.state.projectId;
+    const scopes = normalizeScopes(opts) ?? this.state.scopes;
+    const agentId = opts.agentId ?? (scopes ? undefined : this.state.agentId);
+    const projectId = opts.projectId ?? (scopes ? undefined : this.state.projectId);
     try {
-      const pending = await this.candidates.listAll({
-        agentId,
-        projectId,
-        statuses: ["pending"],
-        limit,
-      });
-      const groups = this.groupByScope(pending);
       const merged: ConsolidationResult = {
         processed: 0,
         promoted: 0,
@@ -107,20 +134,34 @@ export class ConsolidationWorker {
         superseded: 0,
         entries: [],
       };
+      const groups = scopes ?? await this.pendingScopes({ agentId, projectId, limit });
+      const scopeResults: ConsolidationWorkerScopeResult[] = [];
+      const scopeErrors: string[] = [];
 
       for (const group of groups) {
-        const result = await this.consolidator.run({
-          agentId: group.agentId,
-          projectId: group.projectId,
-          limit,
-          statuses: ["pending"],
-        });
-        merged.processed += result.processed;
-        merged.promoted += result.promoted;
-        merged.rejected += result.rejected;
-        merged.needsReview += result.needsReview;
-        merged.superseded += result.superseded;
-        merged.entries.push(...result.entries);
+        const lastRunAt = new Date().toISOString();
+        try {
+          const result = await this.consolidator.run({
+            agentId: group.agentId,
+            projectId: group.projectId,
+            limit,
+            statuses: ["pending"],
+          });
+          merged.processed += result.processed;
+          merged.promoted += result.promoted;
+          merged.rejected += result.rejected;
+          merged.needsReview += result.needsReview;
+          merged.superseded += result.superseded;
+          merged.entries.push(...result.entries);
+          scopeResults.push({ ...group, result, lastRunAt });
+        } catch (error) {
+          scopeResults.push({
+            ...group,
+            lastRunAt,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          scopeErrors.push(`${group.agentId}/${group.projectId ?? "*"}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
 
       this.state = {
@@ -128,8 +169,10 @@ export class ConsolidationWorker {
         lastRunAt: new Date().toISOString(),
         nextRunAt: this.state.running ? new Date(Date.now() + this.state.intervalMs).toISOString() : undefined,
         runCount: this.state.runCount + 1,
-        lastError: undefined,
+        errorCount: this.state.errorCount + (scopeErrors.length > 0 ? 1 : 0),
+        lastError: scopeErrors.length > 0 ? scopeErrors.join("; ") : undefined,
         lastResult: merged,
+        lastScopeResults: scopeResults,
       };
     } catch (error) {
       this.state = {
@@ -148,9 +191,23 @@ export class ConsolidationWorker {
   private groupByScope(candidates: AtomicMemoryCandidate[]): Array<{ agentId: string; projectId?: string }> {
     const keys = new Map<string, { agentId: string; projectId?: string }>();
     for (const candidate of candidates) {
-      const key = `${candidate.agentId}:${candidate.projectId ?? ""}`;
+      const key = scopeKey(candidate);
       if (!keys.has(key)) keys.set(key, { agentId: candidate.agentId, projectId: candidate.projectId });
     }
     return [...keys.values()];
+  }
+
+  private async pendingScopes(opts: {
+    agentId?: string;
+    projectId?: string;
+    limit: number;
+  }): Promise<Array<{ agentId: string; projectId?: string }>> {
+    const pending = await this.candidates.listAll({
+      agentId: opts.agentId,
+      projectId: opts.projectId,
+      statuses: ["pending"],
+      limit: opts.limit,
+    });
+    return this.groupByScope(pending);
   }
 }

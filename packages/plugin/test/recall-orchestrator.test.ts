@@ -288,6 +288,53 @@ describe("RecallOrchestrator.execute()", () => {
     }
   });
 
+  it("records recall audit when v2 recall returns no cards and falls back to legacy", async () => {
+    const previousMode = process.env.MEMORY_FABRIC_V2_MODE;
+    process.env.MEMORY_FABRIC_V2_MODE = "v2-recall";
+    let legacyRecallCalls = 0;
+    let auditPayload: Record<string, unknown> | null = null;
+    const client = makeClient({
+      recall: async () => {
+        legacyRecallCalls += 1;
+        return { memoryBrief: "legacy fallback", sources: ["legacy"], budgetUsed: 10 };
+      },
+      recallPlan: async () => ({
+        ok: true,
+        plan: {
+          query: "empty v2",
+          intent: "fact_confirmation",
+          reason: "test",
+        },
+        cards: [],
+        rendered: "### Memory Cards\nNo relevant memory cards found.",
+        executionTimeMs: 2,
+      }),
+      recallAudit: async (req: Record<string, unknown>) => {
+        auditPayload = req;
+        return { ok: true };
+      },
+    });
+
+    try {
+      const orch = new RecallOrchestrator(client as never, baseConfig);
+      const result = await orch.execute({ agentId: "a1", projectId: "p1", latestMessage: "empty v2" });
+      assert.equal(legacyRecallCalls, 1);
+      assert.ok(auditPayload);
+      assert.equal((auditPayload as { mode?: string }).mode, "v2-recall");
+      assert.equal((auditPayload as { v2?: { cardCount?: number } }).v2?.cardCount, 0);
+      assert.equal((auditPayload as { v2?: { evidenceCount?: number } }).v2?.evidenceCount, 0);
+      assert.equal((auditPayload as { v2?: { renderedChars?: number } }).v2?.renderedChars, 48);
+      assert.deepEqual((auditPayload as { v2?: { memoryIds?: string[] } }).v2?.memoryIds, []);
+      assert.deepEqual((auditPayload as { v2?: { evidenceRefs?: string[] } }).v2?.evidenceRefs, []);
+      assert.deepEqual((auditPayload as { legacy?: { sources?: string[] } }).legacy?.sources, ["legacy"]);
+      assert.equal(result.brief, "legacy fallback");
+      assert.deepEqual(result.sources, ["legacy"]);
+    } finally {
+      if (previousMode === undefined) delete process.env.MEMORY_FABRIC_V2_MODE;
+      else process.env.MEMORY_FABRIC_V2_MODE = previousMode;
+    }
+  });
+
   it("uses sidecar rollout mode before falling back to local environment mode", async () => {
     const previousMode = process.env.MEMORY_FABRIC_V2_MODE;
     process.env.MEMORY_FABRIC_V2_MODE = "shadow";

@@ -104,6 +104,19 @@ function rolloutKey(row: Pick<V2RolloutModeRow, "agentId" | "projectId">): strin
   return `${row.agentId}::${row.projectId ?? ""}`;
 }
 
+function rolloutReasonLabel(reason: string, t: (key: string) => string): string {
+  const labels: Record<string, string> = {
+    candidate_queue_unhealthy: t("v2.rollout.reason.candidateQueue"),
+    candidate_source_refs_low: t("v2.rollout.reason.sourceRefs"),
+    recall_audit_missing: t("v2.rollout.reason.recallAudit"),
+    worker_preflight_not_active: t("v2.rollout.reason.workerPreflight"),
+    worker_scope_missing: t("v2.rollout.reason.workerScope"),
+    mode_not_v2_ready: t("v2.rollout.reason.mode"),
+    main_agent_last_to_promote: t("v2.rollout.reason.mainLast"),
+  };
+  return labels[reason] ?? reason;
+}
+
 function normalizeRolloutScope(scope: RolloutScope): RolloutScope | null {
   const agentId = scope.agentId.trim();
   const projectId = scope.projectId?.trim();
@@ -114,6 +127,7 @@ function normalizeRolloutScope(scope: RolloutScope): RolloutScope | null {
 function statusBadgeClass(status: "pass" | "warn" | "fail" | "ready" | string): string {
   if (status === "pass" || status === "ready") return "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
   if (status === "warn") return "border-amber-400/30 bg-amber-400/10 text-amber-200";
+  if (status === "blocked") return "border-red-400/30 bg-red-400/10 text-red-200";
   if (status === "fail" || status === "rejected") return "border-red-400/30 bg-red-400/10 text-red-200";
   if (status === "promoted") return "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
   if (status === "needs_review") return "border-amber-400/30 bg-amber-400/10 text-amber-200";
@@ -367,7 +381,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
   };
 
   const startWorker = async () => {
-    const res = await api.startV2ConsolidationWorker(CANARY_AGENT_ID, CANARY_PROJECT_ID);
+    const res = await api.startV2ConsolidationWorker(CANARY_AGENT_ID, CANARY_PROJECT_ID, { includeV2WriteScopes: true });
     setWorker(res.status);
     await loadOps();
   };
@@ -381,7 +395,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
 
   const startWorkerFor = async (row: V2RolloutModeRow) => {
     if (!window.confirm(`${t("v2.confirm.startWorkerFor")}\n${row.agentId} / ${row.projectId || "*"}`)) return;
-    const res = await api.startV2ConsolidationWorker(row.agentId, row.projectId);
+    const res = await api.startV2ConsolidationWorker(row.agentId, row.projectId, { includeV2WriteScopes: true });
     setWorker(res.status);
     await loadOps();
   };
@@ -623,7 +637,14 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
     : [];
   const selectedContext = `${ctx.agentId || "-"} / ${ctx.projectId || "-"}`;
   const canaryContext = `${CANARY_AGENT_ID} / ${CANARY_PROJECT_ID}`;
-  const workerContext = `${worker?.agentId ?? "-"} / ${worker?.projectId ?? "-"}`;
+  const workerScopes = worker?.scopes && worker.scopes.length > 0
+    ? worker.scopes
+    : worker?.agentId
+      ? [{ agentId: worker.agentId, projectId: worker.projectId }]
+      : [];
+  const workerContext = workerScopes.length > 0
+    ? workerScopes.map((scope) => `${scope.agentId} / ${scope.projectId ?? "*"}`).join(", ")
+    : "- / -";
   const contextHealthStatus = !contextHealth
     ? "default"
     : contextHealth.compaction.overflowCount > 0 ||
@@ -828,6 +849,8 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                 const key = rolloutKey(row);
                 const draft = modeDrafts[key] ?? row.mode;
                 const changed = draft !== row.mode;
+                const blockingReasons = row.health?.blockingReasons ?? [];
+                const advisoryReasons = (row.health?.warnings ?? []).filter((warning) => !blockingReasons.includes(warning));
                 return (
                   <tr key={key} className="border-b border-line/50 align-top">
                     <td className="px-4 py-3">
@@ -864,6 +887,14 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                     <td className="px-4 py-3 text-muted">
                       <div className="flex flex-wrap items-center gap-2">
                         <CompactBadge status={row.health?.status ?? "default"}>{row.health?.status ?? "-"}</CompactBadge>
+                        {row.health?.preflightStatus && (
+                          <CompactBadge status={row.health.preflightStatus}>
+                            {t("v2.rollout.preflight")}: {row.health.preflightStatus}
+                          </CompactBadge>
+                        )}
+                        {row.health?.rolloutOrderHint === "main_agent_last" && (
+                          <CompactBadge status="warn">{t("v2.rollout.mainLast")}</CompactBadge>
+                        )}
                         <span>{row.candidateStats.byStatus.pending} pending · {row.candidateStats.byStatus.needs_review} review</span>
                       </div>
                       <div className="mt-1">{row.recallAudit.count} audits · source {pct(row.health?.candidateSourceCoverage ?? 1)}</div>
@@ -871,10 +902,20 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
                         <div className="mt-1 text-red-200">{row.health.sourceLessCandidates} missing sourceRefs</div>
                       )}
                       {row.recallAudit.lastAt && <div className="mt-1">{formatTime(row.recallAudit.lastAt)}</div>}
-                      {row.health && row.health.warnings.length > 0 && (
+                      {blockingReasons.length > 0 && (
+                        <div className="mt-2 max-w-[300px]">
+                          <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-red-200">{t("v2.rollout.blockedBy")}</div>
+                          <div className="flex flex-wrap gap-1">
+                            {blockingReasons.slice(0, 4).map((reason) => (
+                              <CompactBadge key={reason} status="fail">{rolloutReasonLabel(reason, t)}</CompactBadge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {advisoryReasons.length > 0 && (
                         <div className="mt-2 flex max-w-[260px] flex-wrap gap-1">
-                          {row.health.warnings.slice(0, 3).map((warning) => (
-                            <CompactBadge key={warning} status="warn">{warning}</CompactBadge>
+                          {advisoryReasons.slice(0, 3).map((warning) => (
+                            <CompactBadge key={warning} status="warn">{rolloutReasonLabel(warning, t)}</CompactBadge>
                           ))}
                         </div>
                       )}
@@ -1229,9 +1270,7 @@ export function V2Inspector({ ctx }: V2InspectorProps) {
           </div>
           <div className="mt-3 rounded-lg border border-line bg-deep px-3 py-2 text-xs">
             <span className="text-muted">{t("v2.worker.scope")}: </span>
-            <span className="font-mono text-ink">
-              {worker?.agentId ?? "-"} / {worker?.projectId ?? "-"}
-            </span>
+            <span className="font-mono text-ink">{workerContext}</span>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
             <Metric label="Candidates" value={candidateStats?.total ?? 0} />

@@ -13,7 +13,7 @@ import { MemoryCoreV2 } from "../core/memory-core-v2.js";
 import { EventLedgerService, type EventSourceType } from "../services/event-ledger-service.js";
 import { AtomicMemoryStore, type AtomicMemoryCandidate } from "../services/atomic-memory-store.js";
 import { MemoryConsolidator } from "../services/memory-consolidator.js";
-import { ConsolidationWorker } from "../services/consolidation-worker.js";
+import { ConsolidationWorker, type ConsolidationWorkerScope, type ConsolidationWorkerStatus } from "../services/consolidation-worker.js";
 import { RetrievalPlanner } from "../services/retrieval-planner.js";
 import { CarrierProjectionEngine } from "../services/carrier-projection-engine.js";
 import {
@@ -120,6 +120,43 @@ export function registerV2Routes(
       const [agentId, projectId] = item.includes("::") ? item.split("::", 2) : item.split("/", 2);
       return { agentId, projectId: projectId || undefined };
     }).filter((scope) => Boolean(scope.agentId));
+  const normalizeWorkerScopes = (scopes?: ConsolidationWorkerScope[]): ConsolidationWorkerScope[] | undefined => {
+    const scoped = new Map<string, ConsolidationWorkerScope>();
+    for (const scope of scopes ?? []) {
+      if (!scope.agentId) continue;
+      scoped.set(scopeKey(scope.agentId, scope.projectId), { agentId: scope.agentId, projectId: scope.projectId });
+    }
+    return scoped.size > 0 ? [...scoped.values()] : undefined;
+  };
+  const workerCoversScope = (worker: ConsolidationWorkerStatus, scope: { agentId: string; projectId?: string }): boolean => {
+    if (!worker.running) return false;
+    const scopes = normalizeWorkerScopes(worker.scopes);
+    if (scopes && scopes.length > 0) {
+      return scopes.some((item) => item.agentId === scope.agentId && item.projectId === scope.projectId);
+    }
+    return worker.agentId === scope.agentId && worker.projectId === scope.projectId;
+  };
+  const isMainScope = (scope: { agentId: string; projectId?: string }): boolean =>
+    scope.agentId === "main" && (!scope.projectId || scope.projectId === "main");
+  const collectV2WriteScopes = async (): Promise<ConsolidationWorkerScope[]> => {
+    const scopes = await collectRolloutScopes({});
+    const writes: ConsolidationWorkerScope[] = [];
+    for (const scope of scopes) {
+      const mode = (await rolloutConfig.resolveMode(scope.agentId, scope.projectId)).mode;
+      if (mode === "v2-write") writes.push(scope);
+    }
+    return writes;
+  };
+  const mergeWorkerScopes = (...groups: Array<ConsolidationWorkerScope[] | undefined>): ConsolidationWorkerScope[] | undefined => {
+    const scoped = new Map<string, ConsolidationWorkerScope>();
+    for (const group of groups) {
+      for (const scope of group ?? []) {
+        if (!scope.agentId) continue;
+        scoped.set(scopeKey(scope.agentId, scope.projectId), { agentId: scope.agentId, projectId: scope.projectId });
+      }
+    }
+    return scoped.size > 0 ? [...scoped.values()] : undefined;
+  };
   const sensitiveReason = (content: string): string | null => sensitivePatterns.find((item) => item.pattern.test(content))?.id ?? null;
   const benchFailures = (report: Awaited<ReturnType<MemoryBenchRunner["latest"]>>): string[] => {
     if (!report) return ["no_latest_report"];
@@ -187,13 +224,22 @@ export function registerV2Routes(
       const candidateQueueHealthy = candidateStats.byStatus.pending < 100 && candidateStats.byStatus.needs_review < 50;
       const modeAllowsV2Recall = isV2RecallReady(effective.mode);
       const recallAuditPresent = audits.length > 0;
+      const workerActive = workerCoversScope(worker, scope);
       const warnings = [
         ...(!modeAllowsV2Recall && effective.mode !== "off" ? ["mode_not_v2_ready"] : []),
         ...(!candidateQueueHealthy ? ["candidate_queue_unhealthy"] : []),
         ...(candidateSourceCoverage < 0.98 ? ["candidate_source_refs_low"] : []),
         ...(modeAllowsV2Recall && !recallAuditPresent ? ["recall_audit_missing"] : []),
+        ...(effective.mode !== "v2-write" && !workerActive ? ["worker_preflight_not_active"] : []),
+        ...(isMainScope(scope) && effective.mode !== "off" ? ["main_agent_last_to_promote"] : []),
       ];
-      const status = !candidateQueueHealthy || candidateSourceCoverage < 0.98 ? "fail" : warnings.length > 0 ? "warn" : "ready";
+      const blockingReasons = [
+        ...(!candidateQueueHealthy ? ["candidate_queue_unhealthy"] : []),
+        ...(candidateSourceCoverage < 0.98 ? ["candidate_source_refs_low"] : []),
+        ...(effective.mode === "v2-write" && !workerActive ? ["worker_scope_missing"] : []),
+      ];
+      const preflightStatus = blockingReasons.length > 0 ? "blocked" : warnings.length > 0 ? "warn" : "ready";
+      const status = blockingReasons.length > 0 ? "fail" : warnings.length > 0 ? "warn" : "ready";
       return {
         ...effective,
         candidateStats,
@@ -201,10 +247,13 @@ export function registerV2Routes(
           count: audits.length,
           lastAt: audits[0]?.createdAt,
         },
-        workerActive: worker.running && worker.agentId === scope.agentId && worker.projectId === scope.projectId,
+        workerActive,
         health: {
           status,
           warnings,
+          blockingReasons,
+          preflightStatus,
+          rolloutOrderHint: isMainScope(scope) ? "main_agent_last" : undefined,
           candidateSourceCoverage,
           sourceLessCandidates,
           candidateQueueHealthy,
@@ -218,14 +267,28 @@ export function registerV2Routes(
     const raw = process.env.MEMORY_FABRIC_CONSOLIDATION_WORKER?.toLowerCase();
     return raw === "auto" || raw === "on" || raw === "true" || raw === "1";
   };
+  const shouldIncludeV2WriteScopes = (): boolean => {
+    const raw = process.env.MEMORY_FABRIC_CONSOLIDATION_INCLUDE_V2_WRITE_SCOPES?.toLowerCase();
+    return raw === "auto" || raw === "on" || raw === "true" || raw === "1";
+  };
 
   if (shouldAutoStartWorker()) {
-    consolidationWorker.start({
+    const startOpts = {
       agentId: process.env.MEMORY_FABRIC_CONSOLIDATION_AGENT_ID,
       projectId: process.env.MEMORY_FABRIC_CONSOLIDATION_PROJECT_ID,
       intervalMs: parseOptionalNumber(process.env.MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS),
       limit: parseOptionalNumber(process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT),
-    });
+    };
+    if (shouldIncludeV2WriteScopes()) {
+      void collectV2WriteScopes()
+        .then((scopes) => {
+          const envScope = startOpts.agentId ? [{ agentId: startOpts.agentId, projectId: startOpts.projectId }] : undefined;
+          consolidationWorker.start({ ...startOpts, scopes: mergeWorkerScopes(normalizeWorkerScopes(envScope), scopes) });
+        })
+        .catch(() => consolidationWorker.start(startOpts));
+    } else {
+      consolidationWorker.start(startOpts);
+    }
   }
 
   app.addHook("onClose", () => {
@@ -389,9 +452,23 @@ export function registerV2Routes(
   );
 
   app.post<{
-    Body: { intervalMs?: number; limit?: number; agentId?: string; projectId?: string };
+    Body: {
+      intervalMs?: number;
+      limit?: number;
+      agentId?: string;
+      projectId?: string;
+      scopes?: ConsolidationWorkerScope[];
+      includeV2WriteScopes?: boolean;
+    };
   }>("/v2/consolidation/worker/start", async (request) => {
-    const status = consolidationWorker.start(request.body ?? {});
+    const body = request.body ?? {};
+    const explicitScopes = mergeWorkerScopes(
+      normalizeWorkerScopes(body.scopes),
+      normalizeWorkerScopes(body.agentId ? [{ agentId: body.agentId, projectId: body.projectId }] : undefined)
+    );
+    const v2WriteScopes = body.includeV2WriteScopes ? await collectV2WriteScopes() : undefined;
+    const scopes = mergeWorkerScopes(explicitScopes, v2WriteScopes);
+    const status = consolidationWorker.start({ ...body, scopes });
     return { ok: true, status };
   });
 
@@ -955,6 +1032,8 @@ export function registerV2Routes(
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
     const avg = (values: number[]): number => values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
     const checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message: string; value?: unknown }> = [];
+    const writeCanaryExpected = expectedMode === "v2-write" || mode === "v2-write";
+    const workerScopeCovered = workerCoversScope(worker, { agentId, projectId });
 
     checks.push({
       id: "mode",
@@ -971,11 +1050,15 @@ export function registerV2Routes(
     checks.push({
       id: "worker_scope",
       status:
-        !worker.running || (worker.agentId === agentId && worker.projectId === projectId)
+        !worker.running || workerScopeCovered
           ? "pass"
-          : "fail",
-      message: "ConsolidationWorker should target the canary agent/project",
-      value: { agentId: worker.agentId, projectId: worker.projectId },
+          : writeCanaryExpected
+            ? "fail"
+            : "warn",
+      message: writeCanaryExpected
+        ? "ConsolidationWorker should target the v2-write canary agent/project"
+        : "ConsolidationWorker coverage is optional until this scope is promoted to v2-write",
+      value: { agentId: worker.agentId, projectId: worker.projectId, scopes: worker.scopes },
     });
     checks.push({
       id: "candidate_queue",

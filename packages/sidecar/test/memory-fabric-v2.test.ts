@@ -5,6 +5,7 @@ import Fastify from "fastify";
 import { describe, it, expect, beforeEach, afterEach } from "./test-helpers.js";
 import type { SidecarConfig } from "../src/config/index.js";
 import { AtomicMemoryStore } from "../src/services/atomic-memory-store.js";
+import { ConsolidationWorker } from "../src/services/consolidation-worker.js";
 import { EventLedgerService } from "../src/services/event-ledger-service.js";
 import { MemoryConsolidator } from "../src/services/memory-consolidator.js";
 import { MemoryCoreV2 } from "../src/core/memory-core-v2.js";
@@ -161,6 +162,127 @@ describe("Memory Fabric V2", () => {
     expect(recall.cards.some((card) => card.content.includes("source-less legacy"))).toBe(false);
     expect(recall.cards.some((card) => card.evidence.includes(distractorEvent.eventId))).toBe(false);
     expect(recall.rendered).toContain("Memory Cards");
+  });
+
+  it("runs consolidation across explicit worker scopes", async () => {
+    const candidateStore = new AtomicMemoryStore(cfg);
+    const consolidator = new MemoryConsolidator(cfg, candidateStore);
+    const worker = new ConsolidationWorker(candidateStore, consolidator);
+
+    await candidateStore.create({
+      agentId: "product",
+      projectId: "Product",
+      type: "fact",
+      content: "Product scope pending candidate should be promoted by the multi-scope worker.",
+      sourceRefs: ["evt_product_worker"],
+      confidence: 0.9,
+    });
+    await candidateStore.create({
+      agentId: "ops",
+      projectId: "Ops",
+      type: "decision",
+      content: "Ops scope pending candidate should also be promoted by the multi-scope worker.",
+      sourceRefs: ["evt_ops_worker"],
+      confidence: 0.9,
+    });
+
+    worker.start({
+      intervalMs: 60_000,
+      limit: 10,
+      scopes: [
+        { agentId: "product", projectId: "Product" },
+        { agentId: "ops", projectId: "Ops" },
+      ],
+    });
+    const status = await worker.runOnce();
+    worker.stop();
+
+    expect(status.running).toBe(true);
+    expect(status.agentId).toBeUndefined();
+    expect(status.scopes).toEqual([
+      { agentId: "product", projectId: "Product" },
+      { agentId: "ops", projectId: "Ops" },
+    ]);
+    expect(status.lastResult?.processed).toBe(2);
+    expect(status.lastResult?.promoted).toBe(2);
+    expect(status.lastScopeResults).toHaveLength(2);
+
+    const productCandidates = await candidateStore.list({ agentId: "product", projectId: "Product" });
+    const opsCandidates = await candidateStore.list({ agentId: "ops", projectId: "Ops" });
+    expect(productCandidates[0].status).toBe("promoted");
+    expect(opsCandidates[0].status).toBe("promoted");
+  });
+
+  it("holds low-signal fragments for review before promotion", async () => {
+    const candidateStore = new AtomicMemoryStore(cfg);
+    const consolidator = new MemoryConsolidator(cfg, candidateStore);
+
+    const fragment = await candidateStore.create({
+      agentId: "ops",
+      projectId: "Ops",
+      type: "fact",
+      content: "buried in the script",
+      sourceRefs: ["evt_low_signal"],
+      confidence: 0.9,
+      quality: { specificity: 0.9, actionability: 0.9, stability: 0.9, sourceCoverage: 1 },
+    });
+
+    const held = await consolidator.run({ agentId: "ops", projectId: "Ops" });
+
+    expect(held.promoted).toBe(0);
+    expect(held.needsReview).toBe(1);
+    expect(held.entries[0].candidateId).toBe(fragment.candidateId);
+    expect(held.entries[0].reason).toBe("low_signal_too_short");
+
+    const reviewed = await candidateStore.review({
+      candidateId: fragment.candidateId,
+      agentId: "ops",
+      decision: "approve",
+      reviewedBy: "test",
+      reason: "fragment intentionally accepted",
+    });
+    const promoted = await consolidator.run({ agentId: "ops", projectId: "Ops" });
+
+    expect(reviewed?.tags).toContain("manual_review_approved");
+    expect(promoted.promoted).toBe(1);
+  });
+
+  it("does not treat concise CJK rules with code terms as low-signal fragments", async () => {
+    const candidateStore = new AtomicMemoryStore(cfg);
+    const consolidator = new MemoryConsolidator(cfg, candidateStore);
+
+    await candidateStore.create({
+      agentId: "ops",
+      projectId: "Ops",
+      type: "fact",
+      content: "禁止手写 `toISOString()`，统一使用 dateStr helper 生成日期。",
+      sourceRefs: ["evt_cjk_rule"],
+      confidence: 0.9,
+    });
+
+    const result = await consolidator.run({ agentId: "ops", projectId: "Ops" });
+
+    expect(result.needsReview).toBe(0);
+    expect(result.promoted).toBe(1);
+  });
+
+  it("allows complete concise CJK factual statements", async () => {
+    const candidateStore = new AtomicMemoryStore(cfg);
+    const consolidator = new MemoryConsolidator(cfg, candidateStore);
+
+    await candidateStore.create({
+      agentId: "ops",
+      projectId: "Ops",
+      type: "fact",
+      content: "定时任务没有用错数据源",
+      sourceRefs: ["evt_cjk_complete"],
+      confidence: 0.9,
+    });
+
+    const result = await consolidator.run({ agentId: "ops", projectId: "Ops" });
+
+    expect(result.needsReview).toBe(0);
+    expect(result.promoted).toBe(1);
   });
 
   it("marks similar older memories as superseded and excludes them from default recall", async () => {
@@ -340,6 +462,35 @@ describe("Memory Fabric V2", () => {
       else process.env.MEMORY_FABRIC_CONSOLIDATION_INTERVAL_MS = previous.intervalMs;
       if (previous.limit === undefined) delete process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT;
       else process.env.MEMORY_FABRIC_CONSOLIDATION_LIMIT = previous.limit;
+    }
+  });
+
+  it("starts the consolidation worker with explicit API scopes", async () => {
+    const app = Fastify({ logger: false });
+    try {
+      registerV2Routes(app, cfg);
+      await app.ready();
+
+      const scopes = [
+        { agentId: "product", projectId: "Product" },
+        { agentId: "ops", projectId: "Ops" },
+      ];
+      const startRes = await app.inject({
+        method: "POST",
+        url: "/v2/consolidation/worker/start",
+        payload: { intervalMs: 60_000, limit: 20, scopes },
+      });
+      const startBody = JSON.parse(startRes.body);
+
+      expect(startRes.statusCode).toBe(200);
+      expect(startBody.status.running).toBe(true);
+      expect(startBody.status.agentId).toBeUndefined();
+      expect(startBody.status.projectId).toBeUndefined();
+      expect(startBody.status.intervalMs).toBe(60_000);
+      expect(startBody.status.limit).toBe(20);
+      expect(startBody.status.scopes).toEqual(scopes);
+    } finally {
+      await app.close();
     }
   });
 
@@ -526,12 +677,21 @@ describe("Memory Fabric V2", () => {
       expect(developmentStatusBody.mode).toBe("v2-recall");
       expect(developmentStatusBody.readiness.modeReady).toBe(true);
 
+      const developmentCanaryRes = await app.inject({
+        method: "GET",
+        url: "/v2/canary/status?agentId=development&projectId=openclaw&expectedMode=v2-recall",
+      });
+      const developmentCanaryBody = JSON.parse(developmentCanaryRes.body);
+      expect(developmentCanaryBody.mode).toBe("v2-recall");
+      expect(developmentCanaryBody.checks.find((check: { id: string }) => check.id === "worker_scope")?.status).toBe("pass");
+
       const rolloutModesRes = await app.inject({
         method: "GET",
         url: "/v2/rollout/modes?scopes=product::Product,development::openclaw,ops::Ops",
       });
       const rolloutModesBody = JSON.parse(rolloutModesRes.body);
       const productRow = rolloutModesBody.modes.find((row: { agentId: string; projectId?: string }) => row.agentId === "product" && row.projectId === "Product");
+      const developmentRow = rolloutModesBody.modes.find((row: { agentId: string; projectId?: string }) => row.agentId === "development" && row.projectId === "openclaw");
       const opsRow = rolloutModesBody.modes.find((row: { agentId: string; projectId?: string }) => row.agentId === "ops" && row.projectId === "Ops");
 
       expect(rolloutModesBody.ok).toBe(true);
@@ -539,6 +699,10 @@ describe("Memory Fabric V2", () => {
       expect(productRow.health.candidateSourceCoverage).toBe(1);
       expect(productRow.health.candidateQueueHealthy).toBe(true);
       expect(productRow.health.warnings).toContain("recall_audit_missing");
+      expect(productRow.health.preflightStatus).toBe("blocked");
+      expect(productRow.health.blockingReasons).toContain("worker_scope_missing");
+      expect(developmentRow.health.preflightStatus).toBe("warn");
+      expect(developmentRow.health.warnings).toContain("worker_preflight_not_active");
       expect(opsRow.mode).toBe("v2-recall");
       expect(opsRow.health.candidateSourceCoverage).toBe(1);
     } finally {

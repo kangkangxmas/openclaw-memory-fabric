@@ -6,14 +6,14 @@
 ## 1. 当前结论
 
 - v2 基线版可以接入当前 OpenClaw 使用：旧 `/recall`、`/commit`、`/carrier/*` 保持兼容；`/commit` 默认 shadow-write L0 event 和 L1 candidate；`MEMORY_FABRIC_V2_MODE=v2-recall` 可让 `before_prompt_build` 优先注入 v2 memory cards，失败回退 legacy recall。
-- 不建议立即全量切到 `v2-write`：当前生产化能力仍应先在 `development` Agent 灰度，观察 candidate review、worker 巩固、recall 对照日志、Carrier projection 和 Bench 指标。
+- 不建议立即全量切到 `v2-write`：当前生产化能力仍应先按 Agent 灰度，观察 candidate review、worker 巩固、recall 对照日志、Carrier projection 和 Bench 指标；进入 `v2-write` 的 Agent 必须被同一个多 scope `ConsolidationWorker` 覆盖。
 - Carrier 在 v2 中是结构化记忆的 Markdown 投影，不再作为唯一事实源；稳定事实源是 L0 event ledger、L1/L2/L3/L5 stable memories、relation graph 和 source trace。
 
 ## 2. 已完成的生产化基线
 
 ### Phase 1：巩固链路产品化
 
-- `ConsolidationWorker`：支持 start、stop、status、定时处理 pending candidates、幂等 in-flight 锁、失败计数、最后运行结果和最后错误。
+- `ConsolidationWorker`：支持 start、stop、status、定时处理 pending candidates、幂等 in-flight 锁、失败计数、最后运行结果和最后错误；支持 `scopes` 与 `includeV2WriteScopes`，可同时覆盖多个 `v2-write` Agent/Project。
 - Candidate API：支持列表、状态过滤、统计、review approve/reject、批量 retry。
 - `MemoryConsolidator`：成为 worker 和手动 `/v2/consolidation/run` 共用核心；无 `sourceRefs` 不进稳定库；profile/intent 需要明确用户指令、多源高质量证据或人工 review。
 - Manual review：`manual_review_approved` 可作为 profile/intent 高信任门禁，但仍不能绕过 `sourceRefs` 必填。
@@ -22,7 +22,7 @@
 
 - `RetrievalPlanner`：输出 intent、layers、preferredTypes、weights、reason、filter summary 和 ranking 分解；entity relation intent 接入 relation graph 排序增强。
 - `MemoryCardPackager`：支持去重、token budget、80-160 字默认 card、证据摘要、过期/冲突标记。
-- Recall 对照日志：plugin 在 v2 cards 命中时采样 legacy recall，并写入 `/v2/recall/audit`，不影响本次 v2 注入结果。
+- Recall 对照日志：plugin 在 v2 recall 路径被尝试时采样 legacy recall，并写入 `/v2/recall/audit`；v2 无卡片命中时记录 `cardCount=0` 并继续使用 legacy recall fallback，不影响本次注入结果。
 
 ### Phase 3：Carrier 投影治理
 
@@ -139,6 +139,9 @@ pnpm v2:gray-smoke -- \
 - 对每个 Agent 建立独立 candidate stats 和 bench slice。
 - 确认 projectId 作用域隔离：跨 Agent 只通过 federation/shared 进入。
 - V2 Inspector 按 agent/project 过滤 candidates、relations、audit logs、bench cases。
+- 晋级顺序固定为非 main 优先：`userservice / UserService` -> `brand / Brand` -> `development / Development` -> 其他低风险 Agent；`main / main` 放在最后晋级。
+- `v2-recall` scope 属于晋级前预检，未被 `ConsolidationWorker` 覆盖时只能提示 `worker_preflight_not_active`，不能因为 worker scope 直接判定失败；进入 `v2-write` 后才强制 worker 覆盖。
+- 每次切 `v2-write` 前必须清空或解释 pending/needs_review：`pending <= 25`、`needs_review <= 10`、sourceRefs coverage >= 0.98。
 - 切主前记录每个 Agent 的回滚点。
 
 ## 4. API 清单
@@ -212,7 +215,7 @@ pnpm v2:canary-monitor -- \
 巡检关注：
 
 - `mode` 必须是 `v2-write`。
-- ConsolidationWorker 必须运行，并指向 `product / Product`。
+- ConsolidationWorker 必须运行，并且覆盖 `product / Product`；多 Agent 扩灰后还必须覆盖所有 `v2-write` scope。
 - `pending` 和 `needs_review` 不应持续堆积。
 - 最近 candidate 的 `sourceRefs` 覆盖率应 >= 0.98。
 - 有真实 v2 recall 流量后，`recallAudit` 应出现 cards/evidence 指标。
@@ -228,6 +231,7 @@ pnpm v2:canary-monitor -- \
 
 - V2 Inspector 顶部接入 `GET /v2/canary/status`，默认先看只读 canary summary。
 - V2 Inspector 增加多 Agent 灰度配置面板：显示 `off / shadow / v2-recall / v2-write`、来源、队列、recall audit、sourceRefs 覆盖率、health 状态和 Worker 命中状态。
+- 多 Agent 面板显示 `preflightStatus`、`blockingReasons` 和 `main_agent_last` 提示，让不可晋级原因在后台直接可见。
 - 多 Agent 面板会自动展开已发现 Agent/Project，也允许手工添加尚未产生数据的 Agent/Project scope，便于预先切换或回滚。
 - 每个 scope 支持逐个切换、逐个回滚、定向启动 Worker 和 Emergency Off。
 - 新增 runtime rollout API：`GET /v2/rollout/effective`、`GET /v2/rollout/modes`、`POST /v2/rollout/modes`、`POST /v2/rollout/modes/rollback`。
@@ -261,7 +265,7 @@ pnpm v2:canary-monitor -- \
 ## 8. 回滚 Checklist
 
 - 将 `MEMORY_FABRIC_V2_MODE` 改回 `shadow` 或 `off`。
-- 停止 worker：`POST /v2/consolidation/worker/stop`。
+- 停止 worker：`POST /v2/consolidation/worker/stop`。多 Agent 扩灰时，重启 worker 应传 `includeV2WriteScopes=true`，避免只恢复单个 Agent。
 - 如 Carrier 被错误投影，调用 `POST /v2/carriers/projection/rollback`。
 - 保留 v2 event/candidate/stable memory 数据，不删除；通过 status/retraction 修正。
 - 用 `/recall` 验证 legacy prompt 注入恢复。
